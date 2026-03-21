@@ -204,7 +204,7 @@ export function serializeBundleForPrompt(bundle: ResearchBundle): string {
 		sections.push("\n-- LinkedIn Research --");
 		for (const r of bundle.linkedinReports) {
 			sections.push(`  Profile found: ${r.profileFound}`);
-			if (r.positions.length > 0) {
+			if ((r.positions?.length ?? 0) > 0) {
 				sections.push("  Positions:");
 				for (const p of r.positions) {
 					sections.push(
@@ -212,15 +212,15 @@ export function serializeBundleForPrompt(bundle: ResearchBundle): string {
 					);
 				}
 			}
-			if (r.education.length > 0) {
+			if ((r.education?.length ?? 0) > 0) {
 				sections.push(
 					`  Education: ${r.education.map((e) => `${e.degree ?? ""} at ${e.school}`).join("; ")}`,
 				);
 			}
 			sections.push(
-				`  Endorsements: ${r.endorsementsCount}, Recommendations: ${r.recommendationsCount}`,
+				`  Endorsements: ${r.endorsementsCount ?? 0}, Recommendations: ${r.recommendationsCount ?? 0}`,
 			);
-			if (r.discrepancies.length > 0) {
+			if ((r.discrepancies?.length ?? 0) > 0) {
 				sections.push("  Discrepancies found by agent:");
 				for (const d of r.discrepancies) {
 					sections.push(
@@ -237,12 +237,12 @@ export function serializeBundleForPrompt(bundle: ResearchBundle): string {
 			sections.push(
 				`  Username: ${r.username} | Repos: ${r.totalRepos} | Stars: ${r.totalStars} | Commits (90d): ${r.commitsLast90Days}`,
 			);
-			if (r.topLanguages.length > 0) {
+			if ((r.topLanguages?.length ?? 0) > 0) {
 				sections.push(
 					`  Top languages: ${r.topLanguages.map((l) => `${l.language} ${l.percentage}%`).join(", ")}`,
 				);
 			}
-			if (r.notableRepos.length > 0) {
+			if ((r.notableRepos?.length ?? 0) > 0) {
 				sections.push("  Notable repos:");
 				for (const repo of r.notableRepos) {
 					sections.push(
@@ -250,7 +250,7 @@ export function serializeBundleForPrompt(bundle: ResearchBundle): string {
 					);
 				}
 			}
-			if (Object.keys(r.skillsEvidence).length > 0) {
+			if (Object.keys(r.skillsEvidence ?? {}).length > 0) {
 				sections.push(
 					`  Skills evidence: ${Object.entries(r.skillsEvidence)
 						.map(([k, v]) => `${k}=${v ? "YES" : "NO"}`)
@@ -266,11 +266,11 @@ export function serializeBundleForPrompt(bundle: ResearchBundle): string {
 			sections.push(
 				`  Accessible: ${r.accessible} | Freshness: ${r.freshnessScore}/100 | Last updated: ${r.lastUpdatedYear ?? "unknown"}`,
 			);
-			if (r.projects.length > 0) {
+			if ((r.projects?.length ?? 0) > 0) {
 				sections.push("  Projects:");
 				for (const p of r.projects) {
 					sections.push(
-						`    ${p.title} — ${p.techStack.join(", ")} ${p.isLive === false ? "(DEAD LINK)" : ""}`,
+						`    ${p.title} — ${(p.techStack ?? []).join(", ")} ${p.isLive === false ? "(DEAD LINK)" : ""}`,
 					);
 				}
 			}
@@ -283,7 +283,7 @@ export function serializeBundleForPrompt(bundle: ResearchBundle): string {
 			sections.push(
 				`  ${r.companyName}: verified=${r.verified}, status=${r.registrationStatus}, headcount=${r.estimatedHeadcount ?? "unknown"}, industry=${r.industry ?? "unknown"}, credibility=${r.credibilityScore}/100`,
 			);
-			if (r.redFlags.length > 0) {
+			if ((r.redFlags?.length ?? 0) > 0) {
 				for (const flag of r.redFlags) {
 					sections.push(`    RED FLAG [${flag.type}]: ${flag.detail}`);
 				}
@@ -295,9 +295,9 @@ export function serializeBundleForPrompt(bundle: ResearchBundle): string {
 		sections.push("\n-- Web Search --");
 		for (const r of bundle.webSearchReports) {
 			sections.push(
-				`  Mentions: ${r.mentions.length} | Conferences: ${r.conferenceCount} | Awards: ${r.awardCount}`,
+				`  Mentions: ${r.mentions?.length ?? 0} | Conferences: ${r.conferenceCount ?? 0} | Awards: ${r.awardCount ?? 0}`,
 			);
-			for (const m of r.mentions.slice(0, 10)) {
+			for (const m of (r.mentions ?? []).slice(0, 10)) {
 				sections.push(`    [${m.type}] ${m.title} — ${m.url}`);
 			}
 		}

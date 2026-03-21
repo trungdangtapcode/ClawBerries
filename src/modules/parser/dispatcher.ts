@@ -144,7 +144,7 @@ export function previewAgentTargets(
 			return {
 				agentType: plan.type,
 				target: plan.target,
-				targetUrl: directUrl ?? "https://www.google.com",
+				targetUrl: directUrl ?? "https://duckduckgo.com/",
 				timeout: plan.timeout,
 				browserProfile: plan.browserProfile,
 				prompt: directUrl

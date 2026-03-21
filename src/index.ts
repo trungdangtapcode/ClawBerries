@@ -81,8 +81,11 @@ if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
 		process.stdout.write(`[step 7] Done — ${brief.overallRating.toUpperCase()}\n`);
 		process.stdout.write(`\n${JSON.stringify(brief, null, 2)}\n`);
 	})().catch((error: unknown) => {
-		const message = error instanceof Error ? error.message : String(error);
-		process.stderr.write(`${message}\n`);
+		if (error instanceof Error) {
+			process.stderr.write(`${error.message}\n${error.stack}\n`);
+		} else {
+			process.stderr.write(`${String(error)}\n`);
+		}
 		process.exit(1);
 	});
 }

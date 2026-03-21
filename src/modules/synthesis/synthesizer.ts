@@ -152,7 +152,7 @@ export async function synthesize(
 	const userPrompt = serializeBundleForPrompt(bundle);
 
 	// 4. Call LLM with structured output schema
-	const { result, model, tokensUsed } =
+	const { result: rawResult, model, tokensUsed } =
 		await client.generateJson<CandidateBrief>({
 			systemPrompt: SYSTEM_PROMPT,
 			userPrompt,
@@ -160,6 +160,22 @@ export async function synthesize(
 			timeoutMs: 60_000, // structured output may need more time
 			responseSchema: CANDIDATE_BRIEF_SCHEMA,
 		});
+
+	// Ensure all array/object fields have safe defaults — LLM may omit them
+	const result: CandidateBrief = {
+		candidateName: rawResult.candidateName ?? "Unknown",
+		overallRating: rawResult.overallRating ?? "yellow",
+		summary: rawResult.summary ?? "",
+		cvValidity: rawResult.cvValidity ?? { score: 0, totalClaimsChecked: 0, verified: 0, unverifiable: 0, contradicted: 0, assessment: "" },
+		verifiedClaims: rawResult.verifiedClaims ?? [],
+		inconsistencies: rawResult.inconsistencies ?? [],
+		gaps: rawResult.gaps ?? [],
+		interviewMustConfirm: rawResult.interviewMustConfirm ?? [],
+		technicalSnapshot: rawResult.technicalSnapshot ?? { githubStats: null, topLanguages: [], skillsEvidence: {} },
+		employerVerifications: rawResult.employerVerifications ?? [],
+		interviewQuestions: rawResult.interviewQuestions ?? [],
+		sources: rawResult.sources ?? [],
+	};
 
 	// 5. Store brief in DB
 	await db.insert(schema.candidateBriefs).values({

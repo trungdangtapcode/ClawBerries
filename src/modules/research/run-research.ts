@@ -6,8 +6,8 @@ import type {
 	AgentProgressItem,
 	ResearchProgressState,
 } from "@/shared/types/research.js";
-import { callTinyFish } from "./tinyfish-client.js";
 import { config } from "@/shared/config/env.js";
+import { callResearchAgent } from "./research-client.js";
 
 /** Max concurrent TinyFish SSE calls (matches TinyFish concurrency limit) */
 const MAX_CONCURRENCY = 2;
@@ -115,7 +115,7 @@ async function runSingleAgent(
 	const timer = setTimeout(() => controller.abort(), item.timeout);
 
 	try {
-		const { result } = await callTinyFish(
+		const { result } = await callResearchAgent(
 			{
 				url: item.targetUrl,
 				goal: item.prompt,
@@ -144,6 +144,7 @@ async function runSingleAgent(
 		const status = isTimeout ? "timeout" : "failed";
 		const message = err instanceof Error ? err.message : String(err);
 
+		console.error(`[agent ${agentIndex}] ${status}: ${message}`);
 		await updateAgentDb(dbRowId, status, undefined, message);
 		await updateProgress(requestId, agentIndex, {
 			outcome: status,

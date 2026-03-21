@@ -36,6 +36,7 @@
 	},
 	"dependencies": {
 		"drizzle-orm": "^0.45.1",
+		"exa-js": "^2.8.0",
 		"grammy": "^1.41.1",
 		"ioredis": "^5.10.1",
 		"openai": "^6.32.0",
