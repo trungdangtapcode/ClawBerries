@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import dotenv from "dotenv";
-dotenv.config();
+
 // ─── Layer 1: Identity & Contact ─────────────────────────────────────────────
 
 export type Identity = {

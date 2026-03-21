@@ -26,6 +26,8 @@ export interface CandidateProfile {
 	skillsClaimed: string[];
 }
 
+export type BrowserProfile = "lite" | "stealth";
+
 export interface AgentPlan {
 	type:
 		| "linkedin"
@@ -37,6 +39,7 @@ export interface AgentPlan {
 		| "award";
 	target: string;
 	timeout: number;
+	browserProfile: BrowserProfile;
 	params: Record<string, unknown>;
 }
 

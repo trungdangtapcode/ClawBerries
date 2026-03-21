@@ -1,7 +1,7 @@
 /**
- * Typed report interfaces produced by each Step 5 research agent.
- * All agents call TinyFish with { urls, prompt } and parse the result
- * into one of these strongly-typed shapes.
+ * Typed report interfaces and Redis progress state for research agents.
+ * Agents are driven by DispatchPreviewItem[] items from Step 4 (dispatcher).
+ * Each item calls callTinyFish({ url, goal, browser_profile }) independently.
  */
 
 // ─── Agent status ────────────────────────────────────────────────────────────
@@ -13,7 +13,9 @@ export type AgentType =
 	| "github"
 	| "portfolio"
 	| "employer"
-	| "web_search";
+	| "web_search"
+	| "publication"
+	| "award";
 
 // ─── Per-agent report types ───────────────────────────────────────────────────
 

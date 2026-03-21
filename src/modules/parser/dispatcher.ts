@@ -1,6 +1,6 @@
 // import { db, schema } from "@/shared/db/index.js";
 // import { redis } from "@/shared/redis/index.js";
-import type { AgentPlan } from "@/shared/types/candidate.js";
+import type { AgentPlan, BrowserProfile } from "@/shared/types/candidate.js";
 import type {
 	AwardEntry,
 	LinkEntry,
@@ -16,11 +16,21 @@ export type DispatchPreviewItem = {
 	target: string;
 	targetUrl: string;
 	timeout: number;
+	browserProfile: BrowserProfile;
 	prompt: string;
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+const BROWSER_PROFILES: Record<AgentPlan["type"], BrowserProfile> = {
+	linkedin: "stealth",
+	github: "lite",
+	portfolio: "stealth",
+	employer: "stealth",
+	web_search: "lite",
+	publication: "lite",
+	award: "lite",
+};
 const RATE_LIMITS: Record<AgentPlan["type"], number> = {
 	linkedin: 100, // daily budget — LinkedIn scraping is expensive
 	github: 4500, // GitHub REST API: 5000 req/hr authenticated
@@ -124,6 +134,7 @@ export function previewAgentTargets(ocrResult: PdfOcrResult): DispatchPreviewIte
 		target: plan.target,
 		targetUrl: resolveTargetUrl(plan),
 		timeout: plan.timeout,
+		browserProfile: plan.browserProfile,
 		prompt: LOOK_FOR_PROMPTS[plan.type],
 	}));
 }
@@ -204,6 +215,7 @@ function buildLinkedinPlan(
 		type: "linkedin",
 		target: link.href,
 		timeout: DEFAULT_TIMEOUTS_MS.linkedin,
+		browserProfile: BROWSER_PROFILES.linkedin,
 		params: {
 			url: link.href,
 			lookFor: LOOK_FOR_CHECKS.linkedin,
@@ -221,6 +233,7 @@ function buildGithubPlan(link: LinkEntry, claimOnlySkills: string[]): AgentPlan 
 		type: "github",
 		target: link.href,
 		timeout: DEFAULT_TIMEOUTS_MS.github,
+		browserProfile: BROWSER_PROFILES.github,
 		params: {
 			url: link.href,
 			username: extractGithubUsername(link.href),
@@ -240,6 +253,7 @@ function buildPortfolioPlan(
 		type: "portfolio",
 		target: link.href,
 		timeout: DEFAULT_TIMEOUTS_MS.portfolio,
+		browserProfile: BROWSER_PROFILES.portfolio,
 		params: {
 			url: link.href,
 			lookFor: LOOK_FOR_CHECKS.portfolio,
@@ -256,6 +270,7 @@ function buildEmployerPlan(company: string, workHistory: WorkEntry[]): AgentPlan
 		type: "employer",
 		target: company,
 		timeout: DEFAULT_TIMEOUTS_MS.employer,
+		browserProfile: BROWSER_PROFILES.employer,
 		params: {
 			companyName: company,
 			lookFor: LOOK_FOR_CHECKS.employer,
@@ -280,6 +295,7 @@ function buildWebSearchPlan(
 		type: "web_search",
 		target: query,
 		timeout: DEFAULT_TIMEOUTS_MS.web_search,
+		browserProfile: BROWSER_PROFILES.web_search,
 		params: {
 			query,
 			lookFor: LOOK_FOR_CHECKS.web_search,
@@ -302,6 +318,7 @@ function buildPublicationPlan(
 		type: "publication",
 		target,
 		timeout: DEFAULT_TIMEOUTS_MS.publication,
+		browserProfile: BROWSER_PROFILES.publication,
 		params: {
 			url: pub.doi ? `https://doi.org/${pub.doi}` : null,
 			lookFor: LOOK_FOR_CHECKS.publication,
@@ -326,6 +343,7 @@ function buildAwardPlan(
 		type: "award",
 		target,
 		timeout: DEFAULT_TIMEOUTS_MS.award,
+		browserProfile: BROWSER_PROFILES.award,
 		params: {
 			lookFor: LOOK_FOR_CHECKS.award,
 			prompt: LOOK_FOR_PROMPTS.award,
@@ -342,14 +360,14 @@ function buildAwardPlan(
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
 async function applyRateLimits(plans: AgentPlan[]): Promise<AgentPlan[]> {
-	const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD key
+	// const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD key (used when Redis rate limiting is re-enabled)
 	const counters: Partial<Record<AgentPlan["type"], number>> = {};
 	const allowed: AgentPlan[] = [];
 
 	for (const plan of plans) {
 		let current = counters[plan.type] ?? 0;
 		try {
-			const key = `ratelimit:${plan.type}:${today}`;
+			// const key = `ratelimit:${plan.type}:${today}`;
 			// current = counters[plan.type] ?? (await getRedisCounter(key));
 			const limit = RATE_LIMITS[plan.type];
 			if (current >= limit) {
@@ -539,10 +557,10 @@ function normalizeHref(href: string): string {
 	}
 }
 
-function slugify(text: string): string {
-	return text
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-|-$/g, "")
-		.slice(0, 64);
-}
+// function slugify(text: string): string {
+// 	return text
+// 		.toLowerCase()
+// 		.replace(/[^a-z0-9]+/g, "-")
+// 		.replace(/^-|-$/g, "")
+// 		.slice(0, 64);
+// }
