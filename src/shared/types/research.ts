@@ -6,7 +6,12 @@
 
 // ─── Agent status ────────────────────────────────────────────────────────────
 
-export type AgentStatus = "pending" | "running" | "completed" | "failed" | "timeout";
+export type AgentStatus =
+	| "pending"
+	| "running"
+	| "completed"
+	| "failed"
+	| "timeout";
 
 export type AgentType =
 	| "linkedin"

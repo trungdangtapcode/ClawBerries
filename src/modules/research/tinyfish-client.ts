@@ -120,7 +120,10 @@ export async function callTinyFish(
 
 	if (!response.ok) {
 		const body = await response.text().catch(() => "");
-		throw new TinyFishError(response.status, `TinyFish error ${response.status}: ${body}`);
+		throw new TinyFishError(
+			response.status,
+			`TinyFish error ${response.status}: ${body}`,
+		);
 	}
 
 	if (!response.body) {
@@ -149,5 +152,9 @@ export async function callTinyFish(
 	}
 
 	// Stream ended without a COMPLETE event
-	throw new TinyFishError(0, "TinyFish SSE stream ended without COMPLETE event", runId);
+	throw new TinyFishError(
+		0,
+		"TinyFish SSE stream ended without COMPLETE event",
+		runId,
+	);
 }

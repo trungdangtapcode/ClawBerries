@@ -13,17 +13,18 @@
  *
  * Run: pnpm test:integration
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import Redis from "ioredis";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+
 import { eq } from "drizzle-orm";
-import * as schema from "@/shared/db/schema.js";
-import { previewAgentTargets } from "@/modules/parser/dispatcher.js";
+import { drizzle } from "drizzle-orm/postgres-js";
+import Redis from "ioredis";
+import postgres from "postgres";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PdfOcrResult } from "@/modules/parser/cv-parser.js";
-import type { ResearchProgressState } from "@/shared/types/research.js";
-import { runResearch } from "@/modules/research/run-research.js";
+import { previewAgentTargets } from "@/modules/parser/dispatcher.js";
 import { reportProgress } from "@/modules/research/progress.js";
+import { runResearch } from "@/modules/research/run-research.js";
+import * as schema from "@/shared/db/schema.js";
+import type { ResearchProgressState } from "@/shared/types/research.js";
 
 // ─── Infrastructure ────────────────────────────────────────────────────────────
 
@@ -67,6 +68,7 @@ const ocrFixture: PdfOcrResult = {
 			startDate: "2020-07",
 			endDate: null,
 			description: "Built microservices with TypeScript and Node.js",
+			companyUrl: null,
 		},
 	],
 	skills: [

@@ -6,7 +6,7 @@
  *
  * Run: pnpm test:integration
  */
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { callTinyFish } from "@/modules/research/tinyfish-client.js";
 
 describe("callTinyFish — real TinyFish API", () => {
@@ -43,7 +43,9 @@ describe("callTinyFish — real TinyFish API", () => {
 
 		// TinyFish returns an error description somewhere in the result
 		const resultStr = JSON.stringify(result).toLowerCase();
-		expect(resultStr).toMatch(/error|fail|invalid|domain|unavailable|could not/i);
+		expect(resultStr).toMatch(
+			/error|fail|invalid|domain|unavailable|could not/i,
+		);
 	}, 120_000);
 
 	it("respects AbortController signal", async () => {
@@ -53,7 +55,11 @@ describe("callTinyFish — real TinyFish API", () => {
 
 		await expect(
 			callTinyFish(
-				{ url: "https://example.com", goal: "Extract everything on the page", browser_profile: "lite" },
+				{
+					url: "https://example.com",
+					goal: "Extract everything on the page",
+					browser_profile: "lite",
+				},
 				controller.signal,
 			),
 		).rejects.toThrow();

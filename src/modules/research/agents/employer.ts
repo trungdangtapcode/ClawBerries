@@ -1,5 +1,5 @@
-import { callTinyFish } from "../tinyfish-client.js";
 import type { EmployerReport } from "@/shared/types/research.js";
+import { callTinyFish } from "../tinyfish-client.js";
 
 const TIMEOUT_MS = 45_000;
 
@@ -54,7 +54,9 @@ Return structured JSON with:
 			industry: raw.industry ?? null,
 			credibilityScore: raw.credibilityScore ?? 50,
 			redFlags: raw.redFlags ?? [],
-			summary: raw.summary ?? `${companyName}: credibility ${raw.credibilityScore ?? 50}/100`,
+			summary:
+				raw.summary ??
+				`${companyName}: credibility ${raw.credibilityScore ?? 50}/100`,
 		};
 	} finally {
 		clearTimeout(timer);

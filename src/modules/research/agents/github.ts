@@ -1,5 +1,5 @@
-import { callTinyFish } from "../tinyfish-client.js";
 import type { GitHubReport } from "@/shared/types/research.js";
+import { callTinyFish } from "../tinyfish-client.js";
 
 const TIMEOUT_MS = 30_000;
 
@@ -53,7 +53,9 @@ Return structured JSON with:
 			topLanguages: raw.topLanguages ?? [],
 			notableRepos: raw.notableRepos ?? [],
 			skillsEvidence: raw.skillsEvidence ?? {},
-			summary: raw.summary ?? `${raw.totalRepos ?? 0} repos, ${raw.totalStars ?? 0} stars`,
+			summary:
+				raw.summary ??
+				`${raw.totalRepos ?? 0} repos, ${raw.totalStars ?? 0} stars`,
 		};
 	} finally {
 		clearTimeout(timer);

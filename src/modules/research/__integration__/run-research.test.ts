@@ -9,15 +9,15 @@
  * Run: pnpm test:integration
  */
 import { createServer, type Server } from "node:http";
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import Redis from "ioredis";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
 import { eq } from "drizzle-orm";
-import * as schema from "@/shared/db/schema.js";
+import { drizzle } from "drizzle-orm/postgres-js";
+import Redis from "ioredis";
+import postgres from "postgres";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { DispatchPreviewItem } from "@/modules/parser/dispatcher.js";
-import type { ResearchProgressState } from "@/shared/types/research.js";
 import { runResearch } from "@/modules/research/run-research.js";
+import * as schema from "@/shared/db/schema.js";
+import type { ResearchProgressState } from "@/shared/types/research.js";
 
 // ─── Infrastructure ────────────────────────────────────────────────────────────
 
@@ -47,17 +47,31 @@ function buildSseResponse(result: unknown): string {
 async function startFakeTinyFish(): Promise<void> {
 	fakeServer = createServer((req, res) => {
 		let raw = "";
-		req.on("data", (c) => { raw += c; });
+		req.on("data", (c) => {
+			raw += c;
+		});
 		req.on("end", () => {
 			let body: { url?: string; goal?: string } = {};
-			try { body = JSON.parse(raw); } catch { /* ignore */ }
+			try {
+				body = JSON.parse(raw);
+			} catch {
+				/* ignore */
+			}
 
 			// Return a result matching the agent type inferred from the url/goal
 			const signal = `${body.url ?? ""} ${body.goal ?? ""}`.toLowerCase();
-			let result: Record<string, unknown> = { ok: true, summary: "default agent completed" };
+			let result: Record<string, unknown> = {
+				ok: true,
+				summary: "default agent completed",
+			};
 
 			if (signal.includes("linkedin")) {
-				result = { profileFound: true, positions: [], discrepancies: [], summary: "linkedin ok" };
+				result = {
+					profileFound: true,
+					positions: [],
+					discrepancies: [],
+					summary: "linkedin ok",
+				};
 			} else if (signal.includes("github")) {
 				result = { username: "testuser", totalRepos: 5, summary: "github ok" };
 			} else if (signal.includes("google") || signal.includes("search")) {
@@ -76,7 +90,9 @@ async function startFakeTinyFish(): Promise<void> {
 	// Intercept fetch: redirect all calls to agent.tinyfish.ai → fake server
 	originalFetch = globalThis.fetch;
 	globalThis.fetch = async (url, init) => {
-		const u = url.toString().replace("https://agent.tinyfish.ai", `http://127.0.0.1:${fakePort}`);
+		const u = url
+			.toString()
+			.replace("https://agent.tinyfish.ai", `http://127.0.0.1:${fakePort}`);
 		return originalFetch(u, init);
 	};
 }
@@ -105,7 +121,8 @@ const testItems: DispatchPreviewItem[] = [
 	{
 		agentType: "employer",
 		target: "Acme Corp",
-		targetUrl: "https://www.google.com/search?q=%22Acme+Corp%22+Vietnam+company",
+		targetUrl:
+			"https://www.google.com/search?q=%22Acme+Corp%22+Vietnam+company",
 		timeout: 45_000,
 		browserProfile: "stealth",
 		prompt: "Verify company existence via registry.",
@@ -113,7 +130,8 @@ const testItems: DispatchPreviewItem[] = [
 	{
 		agentType: "web_search",
 		target: "Integration Test User Acme Corp",
-		targetUrl: "https://www.google.com/search?q=Integration+Test+User+Acme+Corp",
+		targetUrl:
+			"https://www.google.com/search?q=Integration+Test+User+Acme+Corp",
 		timeout: 30_000,
 		browserProfile: "lite",
 		prompt: "Search public web for profile consistency.",
