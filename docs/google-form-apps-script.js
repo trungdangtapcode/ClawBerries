@@ -59,39 +59,30 @@ function onFormSubmit(e) {
   const response = e.response;
   const items = response.getItemResponses();
 
-  // Extract fields by title (case-insensitive match)
+  // Extract fields by title (case-insensitive, strip markers like (*))
   const fields = {};
   for (const item of items) {
-    const title = item.getItem().getTitle().toLowerCase().trim();
+    const title = item.getItem().getTitle().toLowerCase().replace(/\(\*\)/g, "").trim();
     fields[title] = item.getResponse();
   }
 
-  // Map form fields — adjust these keys if your form field titles differ
-  const fullName =
-    fields["full name"] ||
-    fields["name"] ||
-    fields["họ và tên"] ||
-    "";
+  // Helper: find field by substring match (handles variations like "Full Name", "Họ và tên", etc.)
+  function findField(keywords) {
+    var titles = Object.keys(fields);
+    for (var k = 0; k < keywords.length; k++) {
+      for (var t = 0; t < titles.length; t++) {
+        if (titles[t].indexOf(keywords[k]) !== -1) return fields[titles[t]];
+      }
+    }
+    return null;
+  }
 
-  const email =
-    fields["email"] ||
-    fields["email address"] ||
-    fields["địa chỉ email"] ||
-    "";
-
-  const position =
-    fields["position"] ||
-    fields["position applying for"] ||
-    fields["vị trí ứng tuyển"] ||
-    "";
+  const fullName = findField(["full name", "name", "họ và tên"]) || "";
+  const email = findField(["email"]) || "";
+  const position = findField(["position", "vị trí"]) || "";
 
   // File upload returns an array of Drive file IDs
-  const cvFileIds =
-    fields["cv/resume"] ||
-    fields["cv"] ||
-    fields["resume"] ||
-    fields["hồ sơ"] ||
-    [];
+  const cvFileIds = findField(["cv", "resume", "hồ sơ"]) || [];
 
   // Process the first uploaded file
   let cvDownloadUrl = null;

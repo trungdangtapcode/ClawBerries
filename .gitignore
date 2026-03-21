@@ -19,6 +19,6 @@ drizzle/
 #Serena
 .serena/**
 
-db-studio.log
-uploads/**
+
 harshibars-resume.pdf
+storage/**
