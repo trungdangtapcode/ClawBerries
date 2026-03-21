@@ -11,10 +11,12 @@ export default defineConfig({
 		globals: true,
 		environment: "node",
 		include: ["src/**/*.test.ts"],
+		exclude: ["src/**/__integration__/**"],
 		coverage: {
 			provider: "v8",
 			include: ["src/**/*.ts"],
-			exclude: ["src/**/*.test.ts", "src/**/*.d.ts"],
+			exclude: ["src/**/*.test.ts", "src/**/*.d.ts", "src/**/__integration__/**"],
 		},
+		silent: false,
 	},
 });

@@ -1,20 +1,62 @@
+import { callTinyFish } from "../tinyfish-client.js";
+import type { EmployerReport } from "@/shared/types/research.js";
+
+const TIMEOUT_MS = 45_000;
+
 /**
- * Step 5D: Employer Verification Agent
+ * 5D — Employer Verification Agent (per company)
  *
- * Verifies that claimed employers exist and are legitimate.
- * Checks Vietnamese business registries and calculates credibility scores.
+ * Uses `lite` for initial registry lookup and `stealth` when hitting
+ * masothue.com / LinkedIn Company Pages which have bot detection.
+ * We use stealth throughout for safety.
  */
 export async function runEmployerAgent(
-	_companyName: string,
+	companyName: string,
 	_requestId: string,
-): Promise<Record<string, unknown>> {
-	// TODO: Search Vietnam National Business Registry by company name
-	// TODO: Search masothue.com for tax code verification
-	// TODO: Optionally call AsiaVerify KYB API
-	// TODO: Search LinkedIn Company Page for employee count
-	// TODO: Google search for recent news/reviews
-	// TODO: Calculate credibility score (0-100)
-	// TODO: Flag issues (doesn't exist, dissolved, size mismatch)
-	// TODO: Return EmployerReport JSON
-	throw new Error("Not implemented");
+): Promise<EmployerReport> {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+	// Masothue.com search provides Vietnamese business registry data
+	const masothueSearchUrl = `https://masothue.com/tim-kiem/?q=${encodeURIComponent(companyName)}`;
+
+	try {
+		const { result } = await callTinyFish(
+			{
+				url: masothueSearchUrl,
+				goal: `Research this Vietnamese company: "${companyName}"
+
+1. Check the current page (masothue.com) for tax code, registration status, and founding date
+2. Also search Google for: "${companyName}" site:linkedin.com/company for employee count
+3. Search Google for: "${companyName}" recent news reviews Glassdoor
+
+Return structured JSON with:
+- companyName: string (normalized official name if found)
+- verified: true/false (found in Vietnamese business registry)
+- registrationStatus: "active" | "dissolved" | "suspended" | "unknown"
+- estimatedHeadcount: number (from LinkedIn or any other source, null if unknown)
+- industry: string (primary industry, null if unknown)
+- credibilityScore: 0-100 score based on verifiability and consistency
+- redFlags: array of strings describing concerns (e.g. "company dissolved", "headcount mismatch")
+- summary: one-line verdict`,
+				browser_profile: "stealth",
+			},
+			controller.signal,
+		);
+
+		const raw = result as Partial<EmployerReport>;
+
+		return {
+			companyName: raw.companyName ?? companyName,
+			verified: raw.verified ?? false,
+			registrationStatus: raw.registrationStatus ?? "unknown",
+			estimatedHeadcount: raw.estimatedHeadcount ?? null,
+			industry: raw.industry ?? null,
+			credibilityScore: raw.credibilityScore ?? 50,
+			redFlags: raw.redFlags ?? [],
+			summary: raw.summary ?? `${companyName}: credibility ${raw.credibilityScore ?? 50}/100`,
+		};
+	} finally {
+		clearTimeout(timer);
+	}
 }
