@@ -13,8 +13,6 @@ import {
   Menu,
   X,
   Bell,
-  Briefcase,
-  CalendarCheck,
   ChevronRight,
 } from "lucide-react"
 

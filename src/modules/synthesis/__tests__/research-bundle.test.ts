@@ -68,6 +68,7 @@ const mockOcrResult: PdfOcrResult = {
 		},
 	],
 	documentMeta: { pageCount: 3, language: "en" },
+	document_text: "Tran Thi B resume content",
 };
 
 const mockBundle: ResearchBundle = {

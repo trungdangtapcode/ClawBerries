@@ -213,6 +213,7 @@ const mockOcrResult: PdfOcrResult = {
 	publications: [],
 	awards: [],
 	documentMeta: { pageCount: 2, language: "en" },
+	document_text: "Nguyen Van A resume content",
 };
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
