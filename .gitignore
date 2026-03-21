@@ -15,3 +15,6 @@ drizzle/
 
 # OS
 .DS_Store
+
+#Serena
+.serena/**

@@ -26,10 +26,20 @@ export interface CandidateProfile {
 	skillsClaimed: string[];
 }
 
+export type BrowserProfile = "lite" | "stealth";
+
 export interface AgentPlan {
-	type: "linkedin" | "github" | "portfolio" | "employer" | "web_search";
+	type:
+		| "linkedin"
+		| "github"
+		| "portfolio"
+		| "employer"
+		| "web_search"
+		| "publication"
+		| "award";
 	target: string;
 	timeout: number;
+	browserProfile: BrowserProfile;
 	params: Record<string, unknown>;
 }
 
