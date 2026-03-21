@@ -16,6 +16,7 @@ const envSchema = z.object({
 
 	// Telegram
 	TELEGRAM_BOT_TOKEN: z.string().optional(),
+	TELEGRAM_HR_CHAT_ID: z.string().optional(),
 
 	// LLM
 	ANTHROPIC_API_KEY: z.string().optional(),
