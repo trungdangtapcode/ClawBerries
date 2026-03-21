@@ -7,6 +7,7 @@ import {
 	timestamp,
 	uuid,
 	varchar,
+	vector,
 } from "drizzle-orm/pg-core";
 
 // Enums
@@ -70,6 +71,10 @@ export const candidateProfiles = pgTable("candidate_profiles", {
 	education: jsonb("education").default([]),
 	skillsClaimed: jsonb("skills_claimed").default([]),
 	rawExtraction: jsonb("raw_extraction"),
+	/** Full plain text extracted from the CV PDF */
+	documentText: text("document_text"),
+	/** OpenAI text-embedding-3-small vector (1536 dims) */
+	documentVec: vector("document_vec", { dimensions: 1536 }),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
