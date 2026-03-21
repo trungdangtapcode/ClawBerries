@@ -27,7 +27,14 @@ export interface CandidateProfile {
 }
 
 export interface AgentPlan {
-	type: "linkedin" | "github" | "portfolio" | "employer" | "web_search";
+	type:
+		| "linkedin"
+		| "github"
+		| "portfolio"
+		| "employer"
+		| "web_search"
+		| "publication"
+		| "award";
 	target: string;
 	timeout: number;
 	params: Record<string, unknown>;
