@@ -158,72 +158,94 @@ Users need instant feedback that their request was received. A 3-minute silent w
 ┌──────────────────────────────────────────────────────────────────┐
 │  STEP 3 — CV PARSING & ENTITY EXTRACTION                         │
 │  Owner: OpenClaw Engine     Platform: Server-side                 │
-│  Duration: 10–15 seconds    Engine: OpenClaw + LLM (Vision)       │
-│  Budget: 15 sec of 3-min SLA                                      │
+│  Duration: 10–20 seconds    Engine: Gemini (multimodal PDF)       │
+│  Budget: 20 sec of 3-min SLA                                      │
+│  Impl: src/features/step3-step4/codex-pdf-ocr.ts                  │
+│        src/features/step3-step4/step3-cv-parser.ts                │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 ### What is it?
-The system extracts structured candidate data from the raw CV file. This transforms an unstructured document into a machine-readable `CandidateProfile`.
+The system extracts structured candidate data from the raw CV PDF. Two extraction paths run in sequence:
+
+1. **Fast path** (`step3-cv-parser.ts`) — regex-based extraction directly on the raw buffer. Works for text-native PDFs in milliseconds. Produces a `CandidateProfile` for immediate dispatch.
+2. **Deep path** (`codex-pdf-ocr.ts`) — sends the PDF as base64 to the Gemini API (multimodal). Produces a richer `PdfOcrResult` with 9 structured sections. Used when the fast path yields insufficient data, or always for full validation.
 
 ### Why does it exist?
 Everything downstream depends on knowing: Who is this person? Where did they work? What links do they have? Without structured extraction, no agents can be dispatched.
 
 ### What to do:
 
-1. **Convert document to processable format**:
-   - PDF → render each page as image (for multimodal LLM)
-   - DOCX → extract text + convert complex layouts to images
-   - Fallback: `Docling` (IBM) for layout-aware text extraction
+1. **Receive PDF path** and validate:
+   - Extension must be `.pdf`
+   - File must exist and be readable
+   - Fail fast with a user-facing error message if either check fails
 
-2. **Run multimodal LLM extraction** (Claude Sonnet with vision):
-   ```
-   Prompt: "Extract the following structured fields from this CV image.
-   Return valid JSON matching the CandidateProfile schema.
-   Handle Vietnamese names with diacritics.
-   If a field is not found, set it to null."
-   ```
+2. **Fast path — regex extraction** (`parseCvFromBuffer` / `parseCvFromPdfPath`):
+   - Decode buffer as UTF-8, fallback to latin1
+   - Extract `email` via regex `[\w.+-]+@[\w.-]+`
+   - Extract `phone` via regex `(?:\+?84|0)[\d\s.-]{8,10}`, normalize to `+84...`
+   - Extract all URLs via regex, classify into `linkedin` / `github` / `portfolio`
+   - Infer `fullName` from first 10 lines (skip blacklisted section headers)
+   - Infer `workHistory` from lines containing a year + separator pattern (`at` / `-` / `|`)
+   - Infer `education` from lines matching school keywords (`university`, `hust`, `hcmut`, etc.)
+   - Infer `skillsClaimed` by matching against a known-skills dictionary
+   - Validate `workHistory` dates (chronological, within 1950–present)
 
-3. **Extract entities into `CandidateProfile`**:
-   | Field | Extraction Method | Example |
-   |-------|------------------|---------|
-   | `full_name` | LLM + regex fallback | "Nguyễn Văn A" |
-   | `email` | Regex `[\w.-]+@[\w.-]+` + LLM | "nva@email.com" |
-   | `phone` | Regex `\+?84[\d-]+` + LLM | "+84 912 345 678" |
-   | `links.linkedin` | URL pattern matching | "linkedin.com/in/nva" |
-   | `links.github` | URL pattern matching | "github.com/nva" |
-   | `links.portfolio` | LLM identifies personal sites | "nva.dev" |
-   | `work_history[]` | LLM structured extraction | Company, title, dates, description |
-   | `education[]` | LLM structured extraction | School, degree, graduation year |
-   | `skills_claimed[]` | LLM keyword extraction | ["Python", "Kubernetes", "AWS"] |
+3. **Deep path — Gemini multimodal extraction** (`processPdfWithGemini`):
+   - Read PDF as base64, POST to `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
+   - Model: `GEMINI_MODEL` env var (default: `gemini-2.5-flash`)
+   - Prompt instructs Gemini to return a **9-section JSON** (`PdfOcrResult`):
 
-4. **Validate extracted data**:
-   - Dates are chronologically valid (start < end)
-   - No overlapping employment periods (flag if found)
-   - Email format valid
-   - Phone number format valid for Vietnam (+84)
-   - URLs are syntactically valid
+   | Section | Key fields | Notes |
+   |---------|-----------|-------|
+   | `identity` | `fullName`, `nameVariants`, `email`, `phone`, `location` | nameVariants include diacritic + non-diacritic forms |
+   | `education[]` | `school`, `degree`, `field`, `startDate`, `endDate`, `gpa{value,scale}` | Dates in `YYYY-MM` format |
+   | `workHistory[]` | `company`, `title`, `startDate`, `endDate`, `description` | Most recent first; `endDate: null` = current |
+   | `skills[]` | `name`, `evidencedBy` | `evidencedBy`: `github` / `portfolio` / `publication` / `claim_only` |
+   | `links[]` | `href`, `type`, `text`, `page` | Every `mailto:`, `tel:`, `http://`, `https://` href found |
+   | `publications[]` | `title`, `venue`, `date`, `coAuthors[]`, `doi` | Academic papers, conference proceedings |
+   | `awards[]` | `title`, `organization`, `date`, `rank` | Prizes, scholarships, honors |
+   | `documentMeta` | `pageCount`, `language` | Language: `"en"`, `"vi"`, etc. |
+
+4. **Parse and validate Gemini response**:
+   - Strip any markdown code fences (` ```json `) before `JSON.parse`
+   - Throw with raw output if JSON parse fails
+   - Abort and throw a timeout error if response exceeds `timeoutMs` (default: 5 min)
 
 5. **Store profile** in `candidate_profiles` table
 
 6. **Update acknowledgment** (amend Telegram message):
    ```
    🔍 Starting research on Nguyễn Văn A...
-   📄 CV parsed: 3 companies, 2 links found, 8 skills claimed
+   📄 CV parsed: 2 jobs, 6 links found, 7 skills (3 evidenced by GitHub)
    🚀 Dispatching research agents now...
    ```
+
+### Key implementation details:
+- `GEMINI_API_KEY` loaded from `.env` via `dotenv.config()` at module load
+- `GEMINI_MODEL` and `GEMINI_BASE_URL` are overridable via env vars
+- Timeout is enforced via `AbortController` + `setTimeout`
+- `step3-cv-parser.ts` exposes a CLI entrypoint: `pnpm tsx step3-cv-parser.ts <path>.pdf`
+- `codex-pdf-ocr.ts` exposes `GeminiPdfWorker` class and `processPdfWithGemini` function
 
 ### Error handling:
 | Error | Action |
 |-------|--------|
-| Corrupted PDF | Send "CV file appears damaged. Can you re-send?" |
-| No extractable text (scanned image) | Use OCR via multimodal LLM (slower, +5s) |
-| Missing critical fields (no name) | Ask: "I couldn't extract a name from this CV. Can you type the candidate's name?" |
-| Ambiguous data | Extract best guess, flag as `confidence: low` |
+| File not found | Throw `PDF file not found: <path>` |
+| Not a `.pdf` extension | Throw `Expected a PDF file path` |
+| Missing `GEMINI_API_KEY` | Throw `Missing GEMINI_API_KEY` |
+| Gemini API non-2xx | Throw with status code + response body |
+| Gemini blocked request | Throw `Gemini blocked request: <reason>` |
+| Empty Gemini response | Throw `Gemini returned empty content` |
+| JSON parse failure | Throw with raw output for debugging |
+| Request timeout | Throw `Gemini OCR request timed out after Xms` |
+| Fast path: no text extractable | Throw `Unable to extract text from CV` |
+| Fast path: insufficient data | Throw `CV parsing produced insufficient profile data` |
 
 ### Exit criteria:
-✅ `CandidateProfile` JSON is complete with at least `full_name` and one of: `work_history`, `links`, or `skills_claimed`
-✅ Profile stored in database
+✅ `PdfOcrResult` JSON is complete with `identity.fullName` and at least one of: `workHistory`, `links`, `skills`, or `publications`
+✅ Profile stored in `candidate_profiles` table
 ✅ HR manager sees updated message with extraction summary
 ✅ Move to **Step 4**
 
@@ -237,70 +259,159 @@ Everything downstream depends on knowing: Who is this person? Where did they wor
 │  Owner: OpenClaw Engine     Platform: Server-side                 │
 │  Duration: < 2 seconds      Engine: OpenClaw → TinyFish           │
 │  Budget: ~2 sec of 3-min SLA                                      │
+│  Input: PdfOcrResult (from Step 3)                                │
+│  Impl: src/features/step3-step4/step4-dispatcher.ts               │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 ### What is it?
-The orchestrator examines the extracted profile, decides which research agents to launch, and dispatches them all in parallel via TinyFish.
+Takes the `PdfOcrResult` from Step 3 and produces a **cronjob target list** — one entry per website/source to check. Each target carries a URL (or search query), a timeout, and a list of things to look for. The targets are then written to the Redis dispatch queue (`tinyfish:dispatch_queue`) and tracked in the `agent_results` DB table.
 
 ### Why does it exist?
-Not every candidate has a GitHub. Not every CV has portfolio links. Blindly launching all agents wastes resources and time. This step intelligently plans which agents to fire based on available data.
+Not every candidate has a GitHub. Not every CV has portfolio links. Blindly launching all agents wastes resources and time. This step reads exactly what Step 3 found and generates only the targets that make sense to check.
+
+### Step 3 fields consumed:
+
+| `PdfOcrResult` field | Used for |
+|---------------------|----------|
+| `links[]` where `type = "linkedin"` | LinkedIn agent target URL |
+| `links[]` where `type = "github"` | GitHub agent target URL + username |
+| `links[]` where `type = "portfolio"` | Portfolio scrape target URL |
+| `links[]` where `type = "publication"` | Publication DOI / venue lookup URL |
+| `workHistory[].company` (max 5) | One employer verification job per company |
+| `identity.fullName` | Web search query base |
+| `workHistory[0].company` | Appended to web search query |
+| `publications[].title` + `.venue` | Google Scholar / Crossref lookup |
+| `awards[].organization` | Award issuer verification URL |
 
 ### What to do:
 
-1. **Evaluate available data points** and build an agent plan:
+1. **Build the cronjob target list** from `PdfOcrResult`:
 
-   | Condition | Agent to Spawn | Priority |
-   |-----------|---------------|----------|
-   | `links.linkedin` exists | LinkedIn Agent (2A) | **Always** — most valuable for employment verification |
-   | `links.github` exists | GitHub Agent (2B) | **Always** — strongest technical evidence |
-   | `links.portfolio` exists | Portfolio Agent (2C) | If link available |
-   | `work_history[]` is non-empty | Employer Agent (2D) × N | One per company (max 5 most recent) |
-   | Always | Web Search Agent (2E) | **Always** — catch-all safety net |
-   | No links at all | Enhanced Web Search | Search for LinkedIn/GitHub by name + company |
+   | Source condition | Agent type | Target | Timeout |
+   |-----------------|-----------|--------|---------|
+   | `links` has `type=linkedin` | `linkedin` | LinkedIn profile URL | 45 s |
+   | `links` has `type=github` | `github` | GitHub profile URL | 30 s |
+   | `links` has `type=portfolio` | `portfolio` | Portfolio site URL | 60 s |
+   | `workHistory[]` non-empty | `employer` × N | Company name (max 5 most recent) | 45 s |
+   | Always | `web_search` | `identity.fullName` + most recent company | 30 s |
+   | No links at all | `web_search` (enhanced) | Name + each nameVariant → searches LinkedIn/GitHub | 30 s |
 
-2. **Check rate limits** (Redis):
+2. **What each cronjob looks for** at its target:
+
+   **`linkedin` — `https://linkedin.com/in/{handle}`**
+   - Current job title and company → compare against `workHistory[0].title` and `.company`
+   - Employment dates for each position → compare against `workHistory[*].startDate` / `endDate`
+   - Education entries → compare against `education[*].school` and `.degree`
+   - Profile name → compare against `identity.fullName` and `nameVariants`
+   - 🚩 Flag: title mismatch (e.g. CV says "Tech Lead", LinkedIn says "Senior Engineer")
+   - 🚩 Flag: date gap > 3 months unexplained
+   - 🚩 Flag: company present on CV but absent on LinkedIn
+
+   **`github` — `https://github.com/{username}`**
+   - Repository languages → compare against `skills[*].name` where `evidencedBy = "claim_only"`
+   - Commit activity (last 90 days) → flag if CV claims active engineering work but zero commits
+   - Notable repos (stars > 10, forks > 5) → surface as verified project evidence
+   - Account age → flag if account created recently (< 6 months) for a claimed senior engineer
+   - Repo names/descriptions → cross-reference with `workHistory[*].description` project claims
+   - 🚩 Flag: claimed skill has zero matching repo language usage
+   - 🚩 Flag: linked repo in CV (`links[type=github]`) returns 404
+
+   **`portfolio` — `{portfolio URL}`**
+   - Page title and meta description → compare with `identity.fullName`
+   - Listed projects → cross-reference with `workHistory[*].description`
+   - Tech stack mentions → compare against `skills[*].name`
+   - Last-modified header / copyright year → flag if > 18 months stale
+   - All outbound links → check if GitHub/demo links are live (HTTP HEAD)
+   - 🚩 Flag: site returns non-200 (domain expired, server down)
+   - 🚩 Flag: no projects visible or placeholder content
+
+   **`employer` — business registry + LinkedIn Company**
+   - Vietnamese Business Registry (`dangkykinhdoanh.gov.vn`) → verify company name, tax ID, status
+   - `masothue.com` → tax code lookup as secondary confirmation
+   - LinkedIn Company page → employee count, industry, founded year
+   - Check: company size plausibility vs CV role claim (e.g. "led 50-person team" at 8-person company)
+   - Check: company still active (not dissolved)
+   - Check: industry matches role description
+   - 🚩 Flag: company not found in any registry
+   - 🚩 Flag: company dissolved before candidate's stated end date
+   - 🚩 Flag: employee count far below claimed team size
+
+   **`web_search` — SerpAPI / Google**
+   - `"{fullName}" site:linkedin.com OR site:github.com` → find undisclosed profiles
+   - `"{fullName}" "{recentCompany}"` → confirm employment association
+   - `"{fullName}" conference OR speaker OR award` → surface public achievements
+   - `"{fullName}" "{publicationTitle}"` → verify publications exist publicly
+   - Enhanced mode (no links found): additionally search all `nameVariants`
+   - 🚩 Flag: name appears on LinkedIn with a different company than CV claims
+   - 🚩 Flag: web search finds no trace of person at all (very junior or fake identity)
+
+   **`publication` — Google Scholar / Crossref / Semantic Scholar**
+   - Triggered when `publications[]` is non-empty in Step 3 result
+   - Look up `publications[*].title` + `publications[*].venue`
+   - Check: paper exists with candidate listed as author → verify `coAuthors` match
+   - Check: venue is a real indexed conference/journal
+   - Check: `doi` resolves to the correct paper
+   - 🚩 Flag: paper not found under that title
+   - 🚩 Flag: candidate's name absent from the author list
+   - 🚩 Flag: venue not indexed (predatory/fake conference)
+
+   **`award` — organization website**
+   - Triggered when `awards[]` is non-empty
+   - Search `"{award.organization}" "{award.title}" winners {award.date}`
+   - Check: organization website has a winners/results page for that year
+   - Check: candidate's name appears on that page
+   - 🚩 Flag: award cannot be verified on the issuing organization's site
+
+3. **Check rate limits** (Redis) before each dispatch:
    ```
-   GET rate:linkedin:{current_hour}  →  if > 100, queue instead of immediate
-   GET rate:github:{current_hour}    →  if > 4500, throttle
+   GET rate:linkedin:{YYYYMMDDHH}  →  cap 100/hour → dispatchMode: "queued"
+   GET rate:github:{YYYYMMDDHH}    →  cap 4500/hour → dispatchMode: "queued"
+   GET rate:portfolio:{YYYYMMDDHH} →  cap 500/hour
+   GET rate:employer:{YYYYMMDDHH}  →  cap 1000/hour
+   GET rate:web_search:{YYYYMMDDHH}→  cap 1000/hour
    ```
+   Jobs exceeding the cap are written to the queue with `dispatchMode: "queued"` instead of `"running"`.
 
-3. **Dispatch agents in parallel via TinyFish**:
-   ```python
-   async def dispatch_research(profile: CandidateProfile):
-       plan = build_agent_plan(profile)  # Step 4.1
-       check_rate_limits(plan)            # Step 4.2
-
-       tasks = [
-           tinyfish.spawn(agent.type, agent.params, timeout=agent.timeout)
-           for agent in plan.agents
-       ]
-
-       # Fire all simultaneously
-       results = await asyncio.gather(*tasks, return_exceptions=True)
-       return results
-   ```
-
-4. **Create agent tracking records**:
+4. **Write tracking records** to `agent_results` table:
    ```sql
    INSERT INTO agent_results (request_id, agent_type, agent_target, status, started_at)
    VALUES
-     ($req_id, 'linkedin', 'linkedin.com/in/nva', 'running', NOW()),
-     ($req_id, 'github', 'github.com/nva', 'running', NOW()),
-     ($req_id, 'employer', 'FPT Software', 'running', NOW()),
-     ($req_id, 'web_search', 'Nguyen Van A', 'running', NOW());
+     ($req_id, 'linkedin',   'https://linkedin.com/in/thangnt2508', 'running', NOW()),
+     ($req_id, 'github',     'https://github.com/willingWill17',     'running', NOW()),
+     ($req_id, 'employer',   'iGOT.AI',                              'running', NOW()),
+     ($req_id, 'employer',   'Byterover',                            'running', NOW()),
+     ($req_id, 'web_search', 'Thang Tien Nguyen',                    'running', NOW());
    ```
 
-5. **Set progress tracker** in Redis:
+5. **Push jobs to Redis dispatch queue**:
+   ```json
+   {
+     "requestId": "uuid",
+     "agentType": "github",
+     "target": "https://github.com/willingWill17",
+     "timeout": 30000,
+     "jobId": "uuid:github:2",
+     "dispatchedAt": "2026-03-21T10:00:00.000Z",
+     "params": {
+       "url": "https://github.com/willingWill17",
+       "dispatchMode": "running"
+     }
+   }
    ```
-   SET progress:{request_id} '{"total": 5, "completed": 0, "agents": [...]}'
-   EXPIRE progress:{request_id} 600
+   Queue key: `tinyfish:dispatch_queue` (Redis list, `RPUSH`)
+
+6. **Initialize progress tracker** in Redis:
+   ```
+   SET progress:{requestId}  '{"total": 6, "completed": 0, "agents": [...]}'
+   EXPIRE progress:{requestId}  600
    ```
 
 ### Exit criteria:
-✅ All planned agents are dispatched and running in TinyFish
-✅ Agent tracking records exist in `agent_results` table
-✅ Progress tracker initialized in Redis
+✅ Cronjob target list built from `PdfOcrResult` — one entry per verifiable data point
+✅ All jobs pushed to `tinyfish:dispatch_queue`
+✅ Tracking rows inserted into `agent_results` with `status = "running"`
+✅ Progress key initialized in Redis with 10-min TTL
 ✅ Move to **Step 5** (agents run) + **Step 6** (progress reporting, concurrent)
 
 ---
