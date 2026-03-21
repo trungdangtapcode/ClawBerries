@@ -14,9 +14,11 @@ import {
   Mail,
   CalendarPlus,
   MapPin,
-  Briefcase,
-  GraduationCap,
   Brain,
+  Video,
+  Phone,
+  Building2,
+  X,
 } from "lucide-react"
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001"
@@ -44,6 +46,231 @@ interface CandidateData {
   documentText?: string
 }
 
+// ── Schedule Interview Modal ────────────────────────────────────────────────
+function ScheduleInterviewModal({
+  onClose,
+  candidateName,
+  candidateEmail,
+  jobTitle,
+}: {
+  onClose: () => void
+  candidateName: string
+  candidateEmail?: string | null
+  jobTitle?: string | null
+}) {
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000)
+  const [date, setDate] = useState(tomorrow.toISOString().split("T")[0]!)
+  const [time, setTime] = useState("10:00")
+  const [duration, setDuration] = useState("60")
+  const [type, setType] = useState("video")
+  const [notes, setNotes] = useState("")
+  const [success, setSuccess] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleSchedule = async () => {
+    setSubmitting(true)
+    const startDate = new Date(`${date}T${time}`)
+    const endDate = new Date(startDate.getTime() + Number(duration) * 60 * 1000)
+    const location = type === "video" ? "Google Meet" : type === "onsite" ? "Office" : "Phone Call"
+    const summary = `Interview: ${candidateName}${jobTitle ? ` — ${jobTitle}` : ""}`
+    const description = [
+      `Candidate: ${candidateName}`,
+      candidateEmail ? `Email: ${candidateEmail}` : "",
+      jobTitle ? `Position: ${jobTitle}` : "",
+      `Type: ${type}`,
+      notes ? `Notes: ${notes}` : "",
+    ].filter(Boolean).join("\n")
+
+    // Build Google Calendar URL
+    const gcalStart = startDate.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")
+    const gcalEnd = endDate.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")
+    const gcalUrl = new URL("https://calendar.google.com/calendar/render")
+    gcalUrl.searchParams.set("action", "TEMPLATE")
+    gcalUrl.searchParams.set("text", summary)
+    gcalUrl.searchParams.set("dates", `${gcalStart}/${gcalEnd}`)
+    gcalUrl.searchParams.set("details", description)
+    gcalUrl.searchParams.set("location", location)
+    if (candidateEmail) gcalUrl.searchParams.set("add", candidateEmail)
+
+    // Save to backend for the Interviews tab
+    try {
+      await fetch(`${API_BASE}/api/interviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidateName,
+          candidateEmail,
+          jobTitle,
+          interviewType: type,
+          startTime: startDate.toISOString(),
+          endTime: endDate.toISOString(),
+          location,
+          notes,
+          googleCalendarUrl: gcalUrl.toString(),
+        }),
+      })
+    } catch {
+      // Non-blocking — calendar link still works
+    }
+
+    // Open Google Calendar in new tab
+    window.open(gcalUrl.toString(), "_blank")
+    setSuccess(true)
+    setSubmitting(false)
+    setTimeout(onClose, 1500)
+  }
+
+  const TypeIcon = type === "video" ? Video : type === "phone" ? Phone : Building2
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        {/* Header */}
+        <div className="flex items-center gap-3 px-6 py-5 border-b border-outline-variant/10">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+            <CalendarPlus className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold font-heading text-on-surface">Schedule Interview</h2>
+            <p className="text-xs text-on-surface-variant">Creates event in your Google Calendar</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="ml-auto p-2 rounded-xl hover:bg-surface-container transition-colors text-on-surface-variant"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {success ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <div className="w-14 h-14 rounded-full bg-green-50 flex items-center justify-center">
+              <CheckCircle2 className="h-7 w-7 text-green-600" />
+            </div>
+            <p className="font-heading font-bold text-on-surface">Interview Scheduled!</p>
+            <p className="text-xs text-on-surface-variant">Google Calendar opened in a new tab</p>
+          </div>
+        ) : (
+          <>
+            {/* Pre-filled candidate info */}
+            <div className="px-6 pt-5 pb-3">
+              <div className="flex items-center gap-3 bg-surface-container-low rounded-xl p-3">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-fixed to-secondary-container flex items-center justify-center text-sm font-bold text-primary">
+                  {candidateName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-on-surface">{candidateName}</p>
+                  {jobTitle && <p className="text-xs text-on-surface-variant">{jobTitle}</p>}
+                </div>
+              </div>
+            </div>
+
+            {/* Form */}
+            <div className="px-6 py-4 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wide">
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/30 bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wide">
+                    Time
+                  </label>
+                  <input
+                    type="time"
+                    className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/30 bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    value={time}
+                    onChange={(e) => setTime(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wide">
+                    Duration
+                  </label>
+                  <select
+                    className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/30 bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    value={duration}
+                    onChange={(e) => setDuration(e.target.value)}
+                  >
+                    <option value="30">30 minutes</option>
+                    <option value="45">45 minutes</option>
+                    <option value="60">60 minutes</option>
+                    <option value="90">90 minutes</option>
+                    <option value="120">2 hours</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wide">
+                    Interview Type
+                  </label>
+                  <select
+                    className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/30 bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    value={type}
+                    onChange={(e) => setType(e.target.value)}
+                  >
+                    <option value="video">📹 Video Call</option>
+                    <option value="onsite">🏢 Onsite</option>
+                    <option value="phone">📞 Phone</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wide">
+                  Notes (optional)
+                </label>
+                <textarea
+                  className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/30 bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"
+                  placeholder="Interview topics, preparation notes..."
+                  rows={3}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
+              </div>
+
+              {/* Preview */}
+              <div className="bg-surface-container-low rounded-xl p-4 flex items-center gap-3">
+                <TypeIcon className="h-5 w-5 text-primary" />
+                <div className="text-xs text-on-surface-variant">
+                  <span className="font-semibold text-on-surface">{date}</span> at <span className="font-semibold text-on-surface">{time}</span> · {duration} min · {type === "video" ? "Video Call" : type === "phone" ? "Phone" : "Onsite"}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-outline-variant/10 bg-surface-container-lowest">
+              <Button variant="ghost" onClick={onClose}>Cancel</Button>
+              <Button
+                onClick={handleSchedule}
+                disabled={submitting || !date || !time}
+                className="gap-2 rounded-xl"
+                style={{ background: "linear-gradient(135deg, #003b56 0%, #005377 100%)", color: "white" }}
+              >
+                {submitting ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</>
+                ) : (
+                  <><CalendarPlus className="h-4 w-4" /> Add to Google Calendar</>
+                )}
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function CandidateProfile() {
   const { id } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
@@ -57,6 +284,7 @@ export default function CandidateProfile() {
   const [notes, setNotes] = useState("")
   const [jobTitle, setJobTitle] = useState<string | null>(null)
   const [screeningStatus, setScreeningStatus] = useState<string>("pending")
+  const [showScheduleModal, setShowScheduleModal] = useState(false)
 
   // Fetch candidate data
   useEffect(() => {
@@ -162,11 +390,24 @@ export default function CandidateProfile() {
               <Mail className="h-4 w-4" /> Email Candidate
             </a>
           )}
-          <button className="px-5 py-2 rounded-xl bg-gradient-to-br from-[#003b56] to-[#005377] text-white font-semibold text-sm hover:opacity-90 shadow-lg transition-all flex items-center gap-2">
+          <button
+            onClick={() => setShowScheduleModal(true)}
+            className="px-5 py-2 rounded-xl bg-gradient-to-br from-[#003b56] to-[#005377] text-white font-semibold text-sm hover:opacity-90 shadow-lg transition-all flex items-center gap-2"
+          >
             <CalendarPlus className="h-4 w-4" /> Schedule Interview
           </button>
         </div>
       </header>
+
+      {/* Schedule Interview Modal */}
+      {showScheduleModal && (
+        <ScheduleInterviewModal
+          onClose={() => setShowScheduleModal(false)}
+          candidateName={displayName}
+          candidateEmail={candidate.candidateEmail}
+          jobTitle={jobTitle}
+        />
+      )}
 
       <div className="px-8 pb-12 flex flex-col gap-8 pt-6">
         {/* Hero Profile Section */}

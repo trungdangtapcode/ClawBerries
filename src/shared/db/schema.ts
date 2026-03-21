@@ -138,3 +138,17 @@ export const auditLogs = pgTable("audit_logs", {
 	details: jsonb("details"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+export const interviews = pgTable("interviews", {
+	id: uuid().primaryKey().defaultRandom(),
+	candidateName: varchar("candidate_name", { length: 255 }).notNull(),
+	candidateEmail: varchar("candidate_email", { length: 255 }),
+	jobTitle: varchar("job_title", { length: 255 }),
+	interviewType: varchar("interview_type", { length: 32 }).notNull().default("video"),
+	startTime: timestamp("start_time").notNull(),
+	endTime: timestamp("end_time").notNull(),
+	location: varchar("location", { length: 255 }),
+	notes: text("notes"),
+	googleCalendarUrl: text("google_calendar_url"),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+});
