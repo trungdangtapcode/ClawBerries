@@ -1,14 +1,14 @@
 import { useState, useEffect } from "react"
+import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import {
   Users,
   ChevronRight,
   Sparkles,
-  Code,
-  Palette,
-  Megaphone,
-  Layers,
+  Briefcase,
+  Plus,
   Loader2,
+  X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -21,87 +21,28 @@ interface Candidate {
   role: string
   location: string
   aiMatch: number
-  status: "shortlisted" | "new_review" | "pending"
+  status: "shortlisted" | "new_review" | "pending" | "waitlisted" | "rejected"
+  screeningStatus: string
   appliedAgo: string
 }
 
-interface JobPosition {
+interface JobFromAPI {
   id: string
   title: string
-  department: string
-  icon: typeof Code
-  iconBg: string
-  iconColor: string
-  status: "active" | "urgent" | "paused"
+  department: string | null
+  description: string | null
+  status: "active" | "paused" | "closed"
+  createdAt: string
   applicants: number
   shortlisted: number
-  avgAI: number
 }
 
-// ── Sample data (will be replaced by API data when available) ──────────────
-const SAMPLE_POSITIONS: JobPosition[] = [
-  {
-    id: "1",
-    title: "Senior Software Engineer",
-    department: "Engineering Department",
-    icon: Code,
-    iconBg: "bg-primary/10",
-    iconColor: "text-primary",
-    status: "active",
-    applicants: 42,
-    shortlisted: 8,
-    avgAI: 88,
-  },
-  {
-    id: "2",
-    title: "Product Manager",
-    department: "Product Department",
-    icon: Layers,
-    iconBg: "bg-teal-50",
-    iconColor: "text-teal-600",
-    status: "urgent",
-    applicants: 28,
-    shortlisted: 5,
-    avgAI: 76,
-  },
-  {
-    id: "3",
-    title: "UI/UX Designer",
-    department: "Design Department",
-    icon: Palette,
-    iconBg: "bg-emerald-50",
-    iconColor: "text-emerald-600",
-    status: "active",
-    applicants: 56,
-    shortlisted: 12,
-    avgAI: 82,
-  },
-  {
-    id: "4",
-    title: "Marketing Operations",
-    department: "Growth Department",
-    icon: Megaphone,
-    iconBg: "bg-slate-100",
-    iconColor: "text-slate-600",
-    status: "paused",
-    applicants: 18,
-    shortlisted: 3,
-    avgAI: 65,
-  },
-]
-
-const SAMPLE_CANDIDATES: Candidate[] = [
-  { id: "1", name: "Alex Rivera", role: "Senior Software Engineer", location: "San Francisco, CA", aiMatch: 94, status: "shortlisted", appliedAgo: "Applied 2d ago" },
-  { id: "2", name: "Emily Lu", role: "UI/UX Designer", location: "Remote", aiMatch: 91, status: "shortlisted", appliedAgo: "Applied 1d ago" },
-  { id: "3", name: "Kevin Barker", role: "Product Manager", location: "New York, NY", aiMatch: 87, status: "new_review", appliedAgo: "Applied 5h ago" },
-]
-
 // ── Status badge ───────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: JobPosition["status"] }) {
+function StatusBadge({ status }: { status: JobFromAPI["status"] }) {
   const config = {
-    active:  { label: "Active",  className: "bg-surface-container text-on-surface-variant" },
-    urgent:  { label: "Urgent",  className: "bg-surface-container text-on-surface-variant" },
-    paused:  { label: "Paused",  className: "bg-surface-container text-on-surface-variant" },
+    active: { label: "Active", className: "bg-emerald-50 text-emerald-700" },
+    paused: { label: "Paused", className: "bg-slate-100 text-slate-600" },
+    closed: { label: "Closed", className: "bg-red-50 text-red-600" },
   }
   const c = config[status]
   return (
@@ -111,13 +52,14 @@ function StatusBadge({ status }: { status: JobPosition["status"] }) {
   )
 }
 
-function CandidateStatusBadge({ status }: { status: Candidate["status"] }) {
-  const config = {
+function CandidateStatusBadge({ screeningStatus }: { screeningStatus: string }) {
+  const config: Record<string, { label: string; className: string }> = {
     shortlisted: { label: "Shortlisted", className: "bg-emerald-100 text-emerald-700" },
-    new_review:  { label: "New Review",  className: "bg-teal-100 text-teal-700" },
+    waitlisted:  { label: "Waitlisted",  className: "bg-amber-100 text-amber-700" },
+    rejected:    { label: "Rejected",    className: "bg-red-100 text-red-600" },
     pending:     { label: "Pending",     className: "bg-slate-100 text-slate-600" },
   }
-  const c = config[status]
+  const c = config[screeningStatus] || config.pending!
   return (
     <span className={cn("inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold", c.className)}>
       {c.label}
@@ -143,31 +85,45 @@ function InitialsAvatar({ name, className }: { name: string; className?: string 
   )
 }
 
+// ── Icon colors for job cards ─────────────────────────────────────────────
+const CARD_COLORS = [
+  { bg: "bg-primary/10", text: "text-primary" },
+  { bg: "bg-teal-50", text: "text-teal-600" },
+  { bg: "bg-emerald-50", text: "text-emerald-600" },
+  { bg: "bg-blue-50", text: "text-blue-600" },
+  { bg: "bg-amber-50", text: "text-amber-600" },
+  { bg: "bg-rose-50", text: "text-rose-600" },
+  { bg: "bg-purple-50", text: "text-purple-600" },
+]
+
 // ── Job Position Card ──────────────────────────────────────────────────────
-function JobCard({ pos }: { pos: JobPosition }) {
-  const Icon = pos.icon
+function JobCard({ job, colorIdx, onClick }: { job: JobFromAPI; colorIdx: number; onClick: () => void }) {
+  const color = CARD_COLORS[colorIdx % CARD_COLORS.length]!
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm border border-outline-variant/10 hover:border-primary/30 transition-all group cursor-pointer">
+    <div
+      onClick={onClick}
+      className="bg-white rounded-2xl p-6 shadow-sm border border-outline-variant/10 hover:border-primary/30 transition-all group cursor-pointer"
+    >
       {/* Header */}
       <div className="flex justify-between items-start mb-6">
-        <div className={cn("p-2.5 rounded-xl", pos.iconBg, pos.iconColor)}>
-          <Icon className="h-5 w-5" />
+        <div className={cn("p-2.5 rounded-xl", color.bg, color.text)}>
+          <Briefcase className="h-5 w-5" />
         </div>
-        <StatusBadge status={pos.status} />
+        <StatusBadge status={job.status} />
       </div>
 
       {/* Title */}
-      <h3 className="text-lg font-bold text-on-surface mb-1 truncate font-heading">{pos.title}</h3>
-      <p className="text-xs text-on-surface-variant mb-5">{pos.department}</p>
+      <h3 className="text-lg font-bold text-on-surface mb-1 truncate font-heading">{job.title}</h3>
+      <p className="text-xs text-on-surface-variant mb-5">{job.department || "General"}</p>
 
       {/* Counts */}
       <div className="grid grid-cols-2 gap-4">
         <div className="flex flex-col">
-          <span className="text-2xl font-black text-primary leading-tight">{pos.applicants}</span>
+          <span className="text-2xl font-black text-primary leading-tight">{job.applicants}</span>
           <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wide">Applicants</span>
         </div>
         <div className="flex flex-col">
-          <span className="text-2xl font-black text-emerald-600 leading-tight">{pos.shortlisted}</span>
+          <span className="text-2xl font-black text-emerald-600 leading-tight">{job.shortlisted}</span>
           <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wide">Shortlisted</span>
         </div>
       </div>
@@ -176,19 +132,121 @@ function JobCard({ pos }: { pos: JobPosition }) {
       <div className="mt-6 pt-4 border-t border-outline-variant/10 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <Sparkles className="h-3.5 w-3.5 text-primary" />
-          <span className="text-xs font-bold text-on-surface">Avg AI: {pos.avgAI}%</span>
+          <span className="text-xs font-bold text-on-surface">View Applicants</span>
         </div>
-        <span className="text-xs font-semibold text-primary group-hover:underline">View Details</span>
+        <ChevronRight className="h-4 w-4 text-on-surface-variant/50 group-hover:text-primary transition-colors" />
+      </div>
+    </div>
+  )
+}
+
+// ── Create Job Modal ──────────────────────────────────────────────────────
+function CreateJobModal({ onClose, onCreate }: { onClose: () => void; onCreate: (job: JobFromAPI) => void }) {
+  const [title, setTitle] = useState("")
+  const [department, setDepartment] = useState("")
+  const [description, setDescription] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleSubmit = async () => {
+    if (!title.trim()) return
+    setSubmitting(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/jobs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title.trim(), department: department.trim() || null, description: description.trim() || null }),
+      })
+      if (!res.ok) throw new Error("Failed to create job")
+      const data = await res.json()
+      onCreate({ ...data.job, applicants: 0, shortlisted: 0 })
+      onClose()
+    } catch (err) {
+      console.error("Failed to create job:", err)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center gap-3 px-6 py-5 border-b border-outline-variant/10">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+            <Briefcase className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold font-heading text-on-surface">Create Job Opening</h2>
+            <p className="text-xs text-on-surface-variant">Define a position to start receiving CVs</p>
+          </div>
+          <button onClick={onClose} className="ml-auto p-2 rounded-xl hover:bg-surface-container transition-colors text-on-surface-variant">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Form */}
+        <div className="px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wide">
+              Job Title *
+            </label>
+            <input
+              className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/30 bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+              placeholder="e.g. Senior Software Engineer"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wide">
+              Department
+            </label>
+            <input
+              className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/30 bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+              placeholder="e.g. Engineering"
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wide">
+              Job Description / Requirements
+            </label>
+            <textarea
+              className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/30 bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"
+              placeholder="Paste the full JD or key requirements here..."
+              rows={6}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-outline-variant/10 bg-surface-container-lowest">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={!title.trim() || submitting}
+            className="gap-2 bg-primary hover:bg-primary/90 text-on-primary rounded-xl disabled:opacity-50"
+          >
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            Create Job Opening
+          </Button>
+        </div>
       </div>
     </div>
   )
 }
 
 // ── Candidate Row ─────────────────────────────────────────────────────────
-function CandidateRow({ candidate, onApprove, onDecline }: {
+function CandidateRow({ candidate, onShortlist, onWaitlist, onReject }: {
   candidate: Candidate
-  onApprove: () => void
-  onDecline: () => void
+  onShortlist: () => void
+  onWaitlist: () => void
+  onReject: () => void
 }) {
   return (
     <div className="px-6 py-4 flex items-center justify-between hover:bg-surface-container-lowest/70 transition-colors group">
@@ -209,23 +267,44 @@ function CandidateRow({ candidate, onApprove, onDecline }: {
 
         {/* Status */}
         <div className="hidden md:flex flex-col items-end gap-0.5">
-          <CandidateStatusBadge status={candidate.status} />
+          <CandidateStatusBadge screeningStatus={candidate.screeningStatus} />
           <span className="text-[9px] text-on-surface-variant">{candidate.appliedAgo}</span>
         </div>
 
         {/* Actions */}
         <div className="flex gap-2">
           <button
-            onClick={onDecline}
-            className="px-3.5 py-1.5 rounded-lg border border-outline-variant/40 text-xs font-bold text-on-surface hover:bg-surface-container transition-colors"
+            onClick={onShortlist}
+            className={cn(
+              "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all",
+              candidate.screeningStatus === "shortlisted"
+                ? "bg-emerald-600 text-white"
+                : "bg-primary text-white hover:opacity-90"
+            )}
           >
-            Decline
+            {candidate.screeningStatus === "shortlisted" ? "✓ Shortlisted" : "Shortlist"}
           </button>
           <button
-            onClick={onApprove}
-            className="px-3.5 py-1.5 rounded-lg bg-primary text-white text-xs font-bold hover:opacity-90 transition-opacity"
+            onClick={onWaitlist}
+            className={cn(
+              "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all",
+              candidate.screeningStatus === "waitlisted"
+                ? "bg-amber-500 text-white"
+                : "border border-outline-variant/40 text-on-surface hover:bg-surface-container"
+            )}
           >
-            Approve
+            {candidate.screeningStatus === "waitlisted" ? "✓ Waitlisted" : "Waitlist"}
+          </button>
+          <button
+            onClick={onReject}
+            className={cn(
+              "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all",
+              candidate.screeningStatus === "rejected"
+                ? "bg-red-600 text-white"
+                : "border border-red-200 text-red-600 hover:bg-red-50"
+            )}
+          >
+            {candidate.screeningStatus === "rejected" ? "✓ Rejected" : "Reject"}
           </button>
         </div>
       </div>
@@ -235,48 +314,81 @@ function CandidateRow({ candidate, onApprove, onDecline }: {
 
 // ── Main Page ─────────────────────────────────────────────────────────────
 export function Documents() {
-  const [positions] = useState<JobPosition[]>(SAMPLE_POSITIONS)
-  const [candidates, setCandidates] = useState<Candidate[]>(SAMPLE_CANDIDATES)
+  const navigate = useNavigate()
+  const [jobs, setJobs] = useState<JobFromAPI[]>([])
+  const [candidates, setCandidates] = useState<Candidate[]>([])
   const [filter, setFilter] = useState("all")
   const [loading, setLoading] = useState(true)
+  const [showCreateModal, setShowCreateModal] = useState(false)
 
-  // Load real candidates from DB if available
+  // Load data
   useEffect(() => {
-    async function loadFromDB() {
+    async function loadData() {
       try {
-        const res = await fetch(`${API_BASE}/api/cv-library`)
-        if (!res.ok) throw new Error("Failed to load")
-        const data = await res.json()
-        if (data.files && data.files.length > 0) {
-          const dbCandidates: Candidate[] = data.files.map((f: any) => ({
-            id: f.id,
-            name: f.candidateName || f.name.replace(/\.[^.]+$/, ""),
-            role: f.tags?.[0] || "Candidate",
-            location: "—",
-            aiMatch: Math.floor(Math.random() * 20 + 75), // placeholder until real scoring
-            status: f.status === "delivered" ? "shortlisted" as const : "new_review" as const,
-            appliedAgo: f.date ? `Applied ${timeAgo(f.date)}` : "Applied recently",
-          }))
-          setCandidates(dbCandidates.length > 0 ? dbCandidates : SAMPLE_CANDIDATES)
+        const [jobsRes, cvRes] = await Promise.all([
+          fetch(`${API_BASE}/api/jobs`),
+          fetch(`${API_BASE}/api/cv-library`),
+        ])
+
+        if (jobsRes.ok) {
+          const data = await jobsRes.json()
+          setJobs(data.jobs || [])
+        }
+
+        if (cvRes.ok) {
+          const data = await cvRes.json()
+          if (data.files && data.files.length > 0) {
+            const dbCandidates: Candidate[] = data.files.slice(0, 5).map((f: any) => ({
+              id: f.id,
+              name: f.candidateName || f.name.replace(/\.[^.]+$/, ""),
+              role: f.tags?.[0] || "Candidate",
+              location: "—",
+              aiMatch: Math.floor(Math.random() * 20 + 75),
+              status: (f.screeningStatus || "pending") as Candidate["status"],
+              screeningStatus: f.screeningStatus || "pending",
+              appliedAgo: f.date ? `Applied ${timeAgo(f.date)}` : "Applied recently",
+            }))
+            setCandidates(dbCandidates)
+          }
         }
       } catch {
-        // Keep sample data
+        // Keep empty
       } finally {
         setLoading(false)
       }
     }
-    loadFromDB()
+    loadData()
   }, [])
 
-  const handleApprove = (id: string) => {
-    setCandidates((prev) => prev.map((c) => c.id === id ? { ...c, status: "shortlisted" as const } : c))
+  const updateScreeningStatus = async (id: string, newStatus: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/cv/${id}/screening`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ screeningStatus: newStatus }),
+      })
+      if (res.ok) {
+        setCandidates((prev) => prev.map((c) =>
+          c.id === id ? { ...c, screeningStatus: newStatus, status: newStatus as Candidate["status"] } : c
+        ))
+      }
+    } catch {
+      console.error("Failed to update screening status")
+    }
   }
-  const handleDecline = (id: string) => {
-    setCandidates((prev) => prev.filter((c) => c.id !== id))
-  }
+
+  const filteredJobs = filter === "all" ? jobs : jobs.filter((j) => j.id === filter)
 
   return (
     <div className="flex flex-col gap-8 max-w-screen-xl">
+      {/* Create Job Modal */}
+      {showCreateModal && (
+        <CreateJobModal
+          onClose={() => setShowCreateModal(false)}
+          onCreate={(job) => setJobs((prev) => [job, ...prev])}
+        />
+      )}
+
       {/* Header */}
       <header className="flex items-center justify-between flex-wrap gap-4">
         <div>
@@ -296,34 +408,59 @@ export function Documents() {
               onChange={(e) => setFilter(e.target.value)}
             >
               <option value="all">All Job Titles</option>
-              {positions.map((p) => (
-                <option key={p.id} value={p.id}>{p.title}</option>
+              {jobs.map((j) => (
+                <option key={j.id} value={j.id}>{j.title}</option>
               ))}
             </select>
             <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 rotate-90 pointer-events-none text-on-surface-variant" />
           </div>
-          {/* Generate Report */}
+          {/* Create Job */}
           <Button
+            onClick={() => setShowCreateModal(true)}
             className="gap-2 rounded-xl text-sm font-semibold shadow-md"
             style={{
               background: "linear-gradient(135deg, #003b56 0%, #005377 100%)",
               color: "white",
             }}
           >
-            <Sparkles className="h-4 w-4" />
-            Generate Report
+            <Plus className="h-4 w-4" />
+            New Job Opening
           </Button>
         </div>
       </header>
 
       {/* Job Position Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-        {positions
-          .filter((p) => filter === "all" || p.id === filter)
-          .map((pos) => (
-            <JobCard key={pos.id} pos={pos} />
+      {loading ? (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      ) : filteredJobs.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 bg-white rounded-2xl border border-outline-variant/10 gap-3">
+          <Briefcase className="h-12 w-12 text-on-surface-variant/20" />
+          <p className="text-sm font-semibold text-on-surface-variant">
+            {jobs.length === 0 ? "No job openings yet" : "No matching jobs"}
+          </p>
+          {jobs.length === 0 && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="mt-1 text-primary font-bold text-xs hover:underline uppercase tracking-widest"
+            >
+              Create your first job opening
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+          {filteredJobs.map((job, i) => (
+            <JobCard
+              key={job.id}
+              job={job}
+              colorIdx={i}
+              onClick={() => navigate(`/cv-search?jobId=${job.id}`)}
+            />
           ))}
-      </div>
+        </div>
+      )}
 
       {/* Key Candidates for Review */}
       <div className="bg-white rounded-2xl shadow-sm border border-outline-variant/10 overflow-hidden">
@@ -360,8 +497,9 @@ export function Documents() {
               <CandidateRow
                 key={c.id}
                 candidate={c}
-                onApprove={() => handleApprove(c.id)}
-                onDecline={() => handleDecline(c.id)}
+                onShortlist={() => updateScreeningStatus(c.id, "shortlisted")}
+                onWaitlist={() => updateScreeningStatus(c.id, "waitlisted")}
+                onReject={() => updateScreeningStatus(c.id, "rejected")}
               />
             ))}
           </div>

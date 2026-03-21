@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react"
+import { useSearchParams, useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import {
   Search,
@@ -14,6 +15,11 @@ import {
   File,
   Download,
   ExternalLink,
+  Briefcase,
+  ChevronDown,
+  ThumbsUp,
+  Clock,
+  XCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -29,6 +35,7 @@ interface CVFile {
   candidateEmail: string | null
   status: string
   overallRating: string | null
+  screeningStatus: string
   date: string
   completedAt: string | null
   tags: string[]
@@ -55,9 +62,13 @@ function timeAgo(dateStr: string) {
 }
 
 // ── File Preview Modal ────────────────────────────────────────────────────────
-interface PreviewFile { id: string; name: string; type: string }
+interface PreviewFile { id: string; name: string; type: string; screeningStatus: string }
 
-function FilePreviewModal({ file, onClose }: { file: PreviewFile; onClose: () => void }) {
+function FilePreviewModal({ file, onClose, onUpdateScreening }: {
+  file: PreviewFile
+  onClose: () => void
+  onUpdateScreening: (id: string, status: string) => void
+}) {
   const [text, setText] = useState<string | null>(null)
   const [textLoading, setTextLoading] = useState(false)
   const fileUrl = `${API_BASE}/api/cv-file/${file.id}`
@@ -101,6 +112,47 @@ function FilePreviewModal({ file, onClose }: { file: PreviewFile; onClose: () =>
             <p className="font-bold text-on-surface text-sm truncate">{file.name}</p>
             <p className="text-[10px] font-bold uppercase tracking-wider text-outline">{cfg.label}</p>
           </div>
+
+          {/* Screening buttons */}
+          <div className="flex items-center gap-1 mr-2">
+            <button
+              onClick={() => onUpdateScreening(file.id, "shortlisted")}
+              title="Shortlist"
+              className={cn(
+                "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors",
+                file.screeningStatus === "shortlisted"
+                  ? "bg-green-100 text-green-700"
+                  : "hover:bg-green-50 text-on-surface-variant hover:text-green-600"
+              )}
+            >
+              <ThumbsUp className="h-3.5 w-3.5" /> Shortlist
+            </button>
+            <button
+              onClick={() => onUpdateScreening(file.id, "waitlisted")}
+              title="Waitlist"
+              className={cn(
+                "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors",
+                file.screeningStatus === "waitlisted"
+                  ? "bg-amber-100 text-amber-700"
+                  : "hover:bg-amber-50 text-on-surface-variant hover:text-amber-600"
+              )}
+            >
+              <Clock className="h-3.5 w-3.5" /> Waitlist
+            </button>
+            <button
+              onClick={() => onUpdateScreening(file.id, "rejected")}
+              title="Reject"
+              className={cn(
+                "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors",
+                file.screeningStatus === "rejected"
+                  ? "bg-red-100 text-red-700"
+                  : "hover:bg-red-50 text-on-surface-variant hover:text-red-600"
+              )}
+            >
+              <XCircle className="h-3.5 w-3.5" /> Reject
+            </button>
+          </div>
+
           <a
             href={fileUrl}
             download={file.name}
@@ -167,6 +219,10 @@ function FilePreviewModal({ file, onClose }: { file: PreviewFile; onClose: () =>
 }
 
 export function CVSearch() {
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const jobId = searchParams.get("jobId") || null
+
   const [searchQuery, setSearchQuery] = useState("")
   const [files, setFiles] = useState<CVFile[]>([])
   const [loading, setLoading] = useState(true)
@@ -174,6 +230,7 @@ export function CVSearch() {
   const [previewFile, setPreviewFile] = useState<PreviewFile | null>(null)
   const [searchResults, setSearchResults] = useState<CVFile[] | null>(null) // null = not searching
   const [searching, setSearching] = useState(false)
+  const [jobTitle, setJobTitle] = useState<string | null>(null)
 
   // Upload state
   const [uploading, setUploading] = useState(false)
@@ -181,12 +238,20 @@ export function CVSearch() {
   const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Job selector for upload
+  const [pendingFiles, setPendingFiles] = useState<File[] | null>(null)
+  const [allJobs, setAllJobs] = useState<{ id: string; title: string; department: string | null }[]>([])
+  const [selectedJobId, setSelectedJobId] = useState<string>(jobId || "")
+
   // ── Fetch files ──────────────────────────────────────────────────────────
   const fetchFiles = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`${API_BASE}/api/cv-library`)
+      const url = jobId
+        ? `${API_BASE}/api/cv-library?jobId=${encodeURIComponent(jobId)}`
+        : `${API_BASE}/api/cv-library`
+      const res = await fetch(url)
       if (!res.ok) throw new Error("API error")
       const data = await res.json()
       setFiles(data.files ?? [])
@@ -195,17 +260,45 @@ export function CVSearch() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [jobId])
 
   useEffect(() => { fetchFiles() }, [fetchFiles])
 
+  // Fetch all jobs for the job selector
+  useEffect(() => {
+    fetch(`${API_BASE}/api/jobs`)
+      .then((r) => r.json())
+      .then((data) => {
+        setAllJobs(data.jobs || [])
+        if (jobId) {
+          const job = data.jobs?.find((j: any) => j.id === jobId)
+          setJobTitle(job?.title || null)
+        }
+      })
+      .catch(() => setAllJobs([]))
+  }, [jobId])
+
+  // ── Stage files for upload (show job selector modal) ────────────────────
+  const stageFiles = useCallback((fileList: FileList | File[]) => {
+    const staged = Array.from(fileList)
+    if (staged.length === 0) return
+
+    // If already filtered by jobId from URL, upload directly
+    if (jobId) {
+      doUpload(staged, jobId)
+    } else {
+      setPendingFiles(staged)
+      setSelectedJobId("")
+    }
+  }, [jobId])
+
   // ── Upload handler ───────────────────────────────────────────────────────
-  const uploadFiles = useCallback(async (fileList: FileList | File[]) => {
-    const filesToUpload = Array.from(fileList)
+  const doUpload = useCallback(async (filesToUpload: File[], targetJobId: string | null) => {
     if (filesToUpload.length === 0) return
 
     setUploading(true)
     setUploadResult(null)
+    setPendingFiles(null)
 
     try {
       const formData = new FormData()
@@ -213,7 +306,10 @@ export function CVSearch() {
         formData.append("files", file, file.name)
       }
 
-      const res = await fetch(`${API_BASE}/api/cv-upload`, {
+      const uploadUrl = targetJobId
+        ? `${API_BASE}/api/cv-upload?jobId=${encodeURIComponent(targetJobId)}`
+        : `${API_BASE}/api/cv-upload`
+      const res = await fetch(uploadUrl, {
         method: "POST",
         body: formData,
       })
@@ -239,11 +335,29 @@ export function CVSearch() {
     }
   }, [fetchFiles])
 
+  // ── Update screening status ─────────────────────────────────────────────
+  const updateScreening = useCallback(async (cvId: string, screeningStatus: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/cv/${cvId}/screening`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ screeningStatus }),
+      })
+      if (!res.ok) throw new Error("Failed")
+      // Update local state
+      setFiles((prev) => prev.map((f) => f.id === cvId ? { ...f, screeningStatus } : f))
+      setSearchResults((prev) => prev?.map((f) => f.id === cvId ? { ...f, screeningStatus } : f) ?? null)
+      setPreviewFile((prev) => prev && prev.id === cvId ? { ...prev, screeningStatus } : prev)
+    } catch {
+      console.error("Failed to update screening status")
+    }
+  }, [])
+
   const openFilePicker = () => fileInputRef.current?.click()
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      uploadFiles(e.target.files)
+      stageFiles(e.target.files)
       e.target.value = ""
     }
   }
@@ -253,7 +367,7 @@ export function CVSearch() {
   const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(false) }
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault(); e.stopPropagation(); setIsDragOver(false)
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) uploadFiles(e.dataTransfer.files)
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) stageFiles(e.dataTransfer.files)
   }
 
   // ── Client-side filtering ────────────────────────────────────────────────
@@ -275,7 +389,10 @@ export function CVSearch() {
     setSearching(true)
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/cv-search?q=${encodeURIComponent(q)}`)
+        const searchUrl = jobId
+          ? `${API_BASE}/api/cv-search?q=${encodeURIComponent(q)}&jobId=${encodeURIComponent(jobId)}`
+          : `${API_BASE}/api/cv-search?q=${encodeURIComponent(q)}`
+        const res = await fetch(searchUrl)
         if (!res.ok) throw new Error("Search failed")
         const data = await res.json()
         setSearchResults(data.files ?? [])
@@ -295,11 +412,93 @@ export function CVSearch() {
         <FilePreviewModal
           file={previewFile}
           onClose={() => setPreviewFile(null)}
+          onUpdateScreening={updateScreening}
         />
       )}
 
       {/* Hidden file input */}
       <input ref={fileInputRef} type="file" accept={ACCEPTED_TYPES} multiple className="hidden" onChange={handleFileChange} />
+
+      {/* ── Job Selector Upload Modal ──────────────────────────────── */}
+      {pendingFiles && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setPendingFiles(null)} />
+          <div className="relative z-10 w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center gap-3 px-6 py-5 border-b border-outline-variant/10">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                <Briefcase className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold font-heading text-on-surface">Select Job Position</h2>
+                <p className="text-xs text-on-surface-variant">
+                  {pendingFiles.length} file{pendingFiles.length !== 1 ? "s" : ""} ready to upload
+                </p>
+              </div>
+              <button onClick={() => setPendingFiles(null)} className="ml-auto p-2 rounded-xl hover:bg-surface-container transition-colors text-on-surface-variant">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Job selector */}
+            <div className="px-6 py-5">
+              <label className="block text-xs font-semibold text-on-surface-variant mb-2 uppercase tracking-wide">
+                Which position is this person applying to? *
+              </label>
+              <div className="relative">
+                <select
+                  className="w-full px-3 py-3 rounded-xl border border-outline-variant/30 bg-surface text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary/20 appearance-none pr-10"
+                  value={selectedJobId}
+                  onChange={(e) => setSelectedJobId(e.target.value)}
+                >
+                  <option value="">— Select a job position —</option>
+                  {allJobs.map((j) => (
+                    <option key={j.id} value={j.id}>
+                      {j.title}{j.department ? ` (${j.department})` : ""}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none text-on-surface-variant" />
+              </div>
+
+              {allJobs.length === 0 && (
+                <p className="mt-3 text-xs text-on-surface-variant">
+                  No job openings found. <a href="/documents" className="text-primary font-bold hover:underline">Create one first</a>.
+                </p>
+              )}
+
+              {/* File list preview */}
+              <div className="mt-4 space-y-1.5">
+                {pendingFiles.slice(0, 5).map((f, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs text-on-surface-variant">
+                    <File className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{f.name}</span>
+                    <span className="ml-auto shrink-0 text-outline">{(f.size / 1024).toFixed(0)} KB</span>
+                  </div>
+                ))}
+                {pendingFiles.length > 5 && (
+                  <p className="text-[10px] text-on-surface-variant">...and {pendingFiles.length - 5} more</p>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-outline-variant/10 bg-surface-container-lowest">
+              <Button variant="ghost" onClick={() => setPendingFiles(null)}>Cancel</Button>
+              <Button
+                onClick={() => doUpload(pendingFiles, selectedJobId || null)}
+                disabled={!selectedJobId}
+                className="gap-2 bg-primary hover:bg-primary/90 text-on-primary rounded-xl disabled:opacity-50"
+              >
+                <Upload className="h-4 w-4" />
+                Upload CVs
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
 
       {/* Upload toast notification */}
       {(uploading || uploadResult) && (
@@ -408,7 +607,10 @@ export function CVSearch() {
               return (
                 <div
                   key={file.id}
-                  onClick={() => setPreviewFile({ id: file.id, name: file.name, type: file.type })}
+                  onClick={() => {
+                    const params = jobId ? `?jobId=${jobId}` : ""
+                    navigate(`/candidate/${file.id}${params}`)
+                  }}
                   className="bg-white p-5 rounded-2xl border border-outline-variant/10 group cursor-pointer transition-all hover:shadow-md"
                   style={{
                     boxShadow: "0 1px 3px rgba(0,0,0,0.02), 0 1px 2px rgba(0,0,0,0.04)",
@@ -445,9 +647,44 @@ export function CVSearch() {
                       <span className="text-[10px] font-bold uppercase tracking-wider text-outline">
                         {cfg.label}
                       </span>
-                      <button className="p-1 hover:bg-surface-container rounded-lg text-outline transition-colors">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); updateScreening(file.id, "shortlisted") }}
+                          title="Shortlist"
+                          className={cn(
+                            "p-1.5 rounded-lg transition-colors",
+                            file.screeningStatus === "shortlisted"
+                              ? "bg-green-100 text-green-700"
+                              : "hover:bg-green-50 text-outline hover:text-green-600"
+                          )}
+                        >
+                          <ThumbsUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); updateScreening(file.id, "waitlisted") }}
+                          title="Waitlist"
+                          className={cn(
+                            "p-1.5 rounded-lg transition-colors",
+                            file.screeningStatus === "waitlisted"
+                              ? "bg-amber-100 text-amber-700"
+                              : "hover:bg-amber-50 text-outline hover:text-amber-600"
+                          )}
+                        >
+                          <Clock className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); updateScreening(file.id, "rejected") }}
+                          title="Reject"
+                          className={cn(
+                            "p-1.5 rounded-lg transition-colors",
+                            file.screeningStatus === "rejected"
+                              ? "bg-red-100 text-red-700"
+                              : "hover:bg-red-50 text-outline hover:text-red-600"
+                          )}
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

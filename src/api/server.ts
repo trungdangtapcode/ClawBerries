@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { join, extname } from "node:path";
 import { db, schema } from "@/shared/db/index.js";
 import { config } from "@/shared/config/env.js";
-import { count, desc, eq, gte, ilike, or } from "drizzle-orm";
+import { count, desc, eq, gte, ilike, or, and, sql } from "drizzle-orm";
 import { processPdfWithGemini } from "@/modules/parser/index.js";
 import type { PdfOcrResult } from "@/modules/parser/cv-parser.js";
 import OpenAI from "openai";
@@ -36,7 +36,7 @@ const PORT = config.PORT + 1; // 3001 — separate from CLI port
 // ── CORS helper ───────────────────────────────────────────────────────────────
 function cors(res: ServerResponse) {
 	res.setHeader("Access-Control-Allow-Origin", "*");
-	res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+	res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
 	res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
@@ -182,30 +182,69 @@ function mapStatus(
 }
 
 /** GET /api/cv-library — uploaded CV files with candidate info */
-async function getCvLibrary(_req: IncomingMessage, res: ServerResponse) {
-	const rows = await db
-		.select({
-			id: schema.researchRequests.id,
-			originalFileName: schema.researchRequests.originalFileName,
-			fileStoragePath: schema.researchRequests.fileStoragePath,
-			status: schema.researchRequests.status,
-			requestedAt: schema.researchRequests.requestedAt,
-			completedAt: schema.researchRequests.completedAt,
-			candidateName: schema.candidateProfiles.fullName,
-			candidateEmail: schema.candidateProfiles.email,
-			overallRating: schema.candidateBriefs.overallRating,
-		})
-		.from(schema.researchRequests)
-		.leftJoin(
-			schema.candidateProfiles,
-			eq(schema.researchRequests.id, schema.candidateProfiles.requestId),
+async function getCvLibrary(req: IncomingMessage, res: ServerResponse) {
+	const url = new URL(req.url ?? "/", "http://localhost");
+	const jobId = url.searchParams.get("jobId")?.trim() || null;
+
+	let rows: any[];
+	try {
+		const baseQuery = db
+			.select({
+				id: schema.researchRequests.id,
+				originalFileName: schema.researchRequests.originalFileName,
+				fileStoragePath: schema.researchRequests.fileStoragePath,
+				status: schema.researchRequests.status,
+				requestedAt: schema.researchRequests.requestedAt,
+				completedAt: schema.researchRequests.completedAt,
+				candidateName: schema.candidateProfiles.fullName,
+				candidateEmail: schema.candidateProfiles.email,
+				overallRating: schema.candidateBriefs.overallRating,
+				jobOpeningId: schema.researchRequests.jobOpeningId,
+				screeningStatus: schema.researchRequests.screeningStatus,
+			})
+			.from(schema.researchRequests)
+			.leftJoin(
+				schema.candidateProfiles,
+				eq(schema.researchRequests.id, schema.candidateProfiles.requestId),
+			)
+			.leftJoin(
+				schema.candidateBriefs,
+				eq(schema.researchRequests.id, schema.candidateBriefs.requestId),
+			);
+
+		rows = await (
+			jobId
+				? baseQuery.where(eq(schema.researchRequests.jobOpeningId, jobId))
+				: baseQuery
 		)
-		.leftJoin(
-			schema.candidateBriefs,
-			eq(schema.researchRequests.id, schema.candidateBriefs.requestId),
-		)
-		.orderBy(desc(schema.researchRequests.requestedAt))
-		.limit(50);
+			.orderBy(desc(schema.researchRequests.requestedAt))
+			.limit(50);
+	} catch {
+		// Fallback: job_opening_id column may not exist yet (migration not applied)
+		rows = await db
+			.select({
+				id: schema.researchRequests.id,
+				originalFileName: schema.researchRequests.originalFileName,
+				fileStoragePath: schema.researchRequests.fileStoragePath,
+				status: schema.researchRequests.status,
+				requestedAt: schema.researchRequests.requestedAt,
+				completedAt: schema.researchRequests.completedAt,
+				candidateName: schema.candidateProfiles.fullName,
+				candidateEmail: schema.candidateProfiles.email,
+				overallRating: schema.candidateBriefs.overallRating,
+			})
+			.from(schema.researchRequests)
+			.leftJoin(
+				schema.candidateProfiles,
+				eq(schema.researchRequests.id, schema.candidateProfiles.requestId),
+			)
+			.leftJoin(
+				schema.candidateBriefs,
+				eq(schema.researchRequests.id, schema.candidateBriefs.requestId),
+			)
+			.orderBy(desc(schema.researchRequests.requestedAt))
+			.limit(50);
+	}
 
 	const files = rows.map((row) => {
 		const fileName = row.originalFileName || "Unknown_CV.pdf";
@@ -218,9 +257,11 @@ async function getCvLibrary(_req: IncomingMessage, res: ServerResponse) {
 			candidateName: row.candidateName || null,
 			candidateEmail: row.candidateEmail || null,
 			status: row.status,
+			screeningStatus: row.screeningStatus || "pending",
 			overallRating: row.overallRating || null,
 			date: row.requestedAt,
 			completedAt: row.completedAt,
+			jobOpeningId: row.jobOpeningId || null,
 			tags: buildTags(row.status, row.overallRating),
 		};
 	});
@@ -228,10 +269,94 @@ async function getCvLibrary(_req: IncomingMessage, res: ServerResponse) {
 	json(res, { files, total: files.length });
 }
 
-/** GET /api/cv-search?q=... — full-text keyword search across document_text */
+/** GET /api/cv-profile/:id — full candidate profile for screening page */
+async function getCvProfile(req: IncomingMessage, res: ServerResponse) {
+	const id = req.url?.split("/").pop()?.split("?")[0];
+	if (!id) { json(res, { error: "Missing id" }, 400); return; }
+
+	try {
+		const rows = await db
+			.select({
+				id: schema.researchRequests.id,
+				originalFileName: schema.researchRequests.originalFileName,
+				status: schema.researchRequests.status,
+				screeningStatus: schema.researchRequests.screeningStatus,
+				requestedAt: schema.researchRequests.requestedAt,
+				completedAt: schema.researchRequests.completedAt,
+				jobOpeningId: schema.researchRequests.jobOpeningId,
+				// candidate_profiles
+				fullName: schema.candidateProfiles.fullName,
+				email: schema.candidateProfiles.email,
+				phone: schema.candidateProfiles.phone,
+				skillsClaimed: schema.candidateProfiles.skillsClaimed,
+				// candidate_briefs
+				overallRating: schema.candidateBriefs.overallRating,
+				documentText: schema.candidateProfiles.documentText,
+			})
+			.from(schema.researchRequests)
+			.leftJoin(schema.candidateProfiles, eq(schema.candidateProfiles.requestId, schema.researchRequests.id))
+			.leftJoin(schema.candidateBriefs, eq(schema.candidateBriefs.requestId, schema.researchRequests.id))
+			.where(eq(schema.researchRequests.id, id))
+			.limit(1);
+
+		if (rows.length === 0) { json(res, { error: "Not found" }, 404); return; }
+		const row = rows[0]!;
+
+		// Use skills from DB first, fall back to keyword extraction
+		let skills: string[] = [];
+		if (Array.isArray(row.skillsClaimed) && row.skillsClaimed.length > 0) {
+			skills = row.skillsClaimed.map((s: any) => {
+				if (typeof s === "string") return s;
+				if (s && typeof s === "object" && s.name) return s.name;
+				return String(s);
+			});
+		} else if (row.documentText) {
+			const commonSkills = [
+				"JavaScript", "TypeScript", "React", "Node.js", "Python", "Java", "C++", "C#",
+				"AWS", "Azure", "GCP", "Docker", "Kubernetes", "PostgreSQL", "MongoDB", "Redis",
+				"GraphQL", "REST API", "Git", "Linux", "HTML", "CSS", "SQL",
+				"Machine Learning", "Deep Learning", "NLP", "Computer Vision",
+				"TensorFlow", "PyTorch", "Agile", "Scrum", "CI/CD",
+				"Next.js", "Vue.js", "Angular", "Express", "Django", "Flask", "Spring Boot",
+				"Figma", "Adobe", "Photoshop", "Illustrator",
+			];
+			for (const s of commonSkills) {
+				if (row.documentText.toLowerCase().includes(s.toLowerCase())) {
+					skills.push(s);
+				}
+			}
+		}
+
+		const candidate = {
+			id: row.id,
+			originalFileName: row.originalFileName || "Unknown_CV.pdf",
+			candidateName: row.fullName || null,
+			candidateEmail: row.email || null,
+			phone: row.phone || null,
+			currentTitle: null,
+			status: row.status,
+			screeningStatus: row.screeningStatus,
+			overallRating: row.overallRating || null,
+			date: row.requestedAt,
+			completedAt: row.completedAt,
+			jobOpeningId: row.jobOpeningId || null,
+			fullName: row.fullName || null,
+			skills,
+			documentText: row.documentText || null,
+		};
+
+		json(res, { candidate });
+	} catch (err) {
+		console.error("[API] getCvProfile error:", err);
+		json(res, { error: "Internal Server Error" }, 500);
+	}
+}
+
+/** GET /api/cv-search?q=...&jobId=... — full-text keyword search across document_text */
 async function searchCvs(req: IncomingMessage, res: ServerResponse) {
 	const url = new URL(req.url ?? "/", "http://localhost");
 	const q = url.searchParams.get("q")?.trim() ?? "";
+	const jobId = url.searchParams.get("jobId")?.trim() || null;
 
 	if (!q || q.length < 2) {
 		json(res, { files: [], total: 0, query: q });
@@ -262,11 +387,14 @@ async function searchCvs(req: IncomingMessage, res: ServerResponse) {
 			eq(schema.researchRequests.id, schema.candidateBriefs.requestId),
 		)
 		.where(
-			or(
-				ilike(schema.candidateProfiles.documentText, pattern),
-				ilike(schema.candidateProfiles.fullName, pattern),
-				ilike(schema.candidateProfiles.email, pattern),
-				ilike(schema.researchRequests.originalFileName, pattern),
+			and(
+				or(
+					ilike(schema.candidateProfiles.documentText, pattern),
+					ilike(schema.candidateProfiles.fullName, pattern),
+					ilike(schema.candidateProfiles.email, pattern),
+					ilike(schema.researchRequests.originalFileName, pattern),
+				),
+				jobId ? eq(schema.researchRequests.jobOpeningId, jobId) : undefined,
 			),
 		)
 		.orderBy(desc(schema.researchRequests.requestedAt))
@@ -306,6 +434,119 @@ function buildTags(status: string, rating: string | null): string[] {
 	return tags;
 }
 
+// ── Job Openings CRUD ─────────────────────────────────────────────────────────
+
+/** GET /api/jobs — list all job openings with applicant count */
+async function getJobs(_req: IncomingMessage, res: ServerResponse) {
+	const rows = await db
+		.select({
+			id: schema.jobOpenings.id,
+			title: schema.jobOpenings.title,
+			department: schema.jobOpenings.department,
+			description: schema.jobOpenings.description,
+			status: schema.jobOpenings.status,
+			createdAt: schema.jobOpenings.createdAt,
+			applicants: sql<number>`cast(count(${schema.researchRequests.id}) as int)`,
+			shortlisted: sql<number>`cast(count(case when ${schema.candidateBriefs.overallRating} = 'green' then 1 end) as int)`,
+		})
+		.from(schema.jobOpenings)
+		.leftJoin(schema.researchRequests, eq(schema.researchRequests.jobOpeningId, schema.jobOpenings.id))
+		.leftJoin(schema.candidateBriefs, eq(schema.candidateBriefs.requestId, schema.researchRequests.id))
+		.groupBy(schema.jobOpenings.id)
+		.orderBy(desc(schema.jobOpenings.createdAt));
+
+	json(res, { jobs: rows, total: rows.length });
+}
+
+/** POST /api/jobs — create a new job opening */
+async function createJob(req: IncomingMessage, res: ServerResponse) {
+	const chunks: Buffer[] = [];
+	for await (const chunk of req) {
+		chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+	}
+	const body = JSON.parse(Buffer.concat(chunks).toString());
+
+	if (!body.title) {
+		json(res, { error: "title is required" }, 400);
+		return;
+	}
+
+	const [row] = await db
+		.insert(schema.jobOpenings)
+		.values({
+			title: body.title,
+			department: body.department || null,
+			description: body.description || null,
+			status: body.status || "active",
+		})
+		.returning();
+
+	console.log(`[API] Created job opening: ${row!.title} (${row!.id})`);
+	json(res, { job: row }, 201);
+}
+
+/** PATCH /api/jobs/:id — update a job opening */
+async function updateJob(req: IncomingMessage, res: ServerResponse) {
+	const id = req.url?.split("/").pop()?.split("?")[0];
+	if (!id) { json(res, { error: "Missing job id" }, 400); return; }
+
+	const chunks: Buffer[] = [];
+	for await (const chunk of req) {
+		chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+	}
+	const body = JSON.parse(Buffer.concat(chunks).toString());
+
+	const updates: Record<string, unknown> = {};
+	if (body.title !== undefined) updates.title = body.title;
+	if (body.department !== undefined) updates.department = body.department;
+	if (body.description !== undefined) updates.description = body.description;
+	if (body.status !== undefined) updates.status = body.status;
+
+	if (Object.keys(updates).length === 0) {
+		json(res, { error: "Nothing to update" }, 400);
+		return;
+	}
+
+	const [row] = await db
+		.update(schema.jobOpenings)
+		.set(updates)
+		.where(eq(schema.jobOpenings.id, id))
+		.returning();
+
+	if (!row) { json(res, { error: "Job not found" }, 404); return; }
+	json(res, { job: row });
+}
+
+/** PATCH /api/cv/:id/screening — update screening status */
+async function updateScreeningStatus(req: IncomingMessage, res: ServerResponse) {
+	const parts = req.url?.split("/") ?? [];
+	// URL: /api/cv/<id>/screening
+	const id = parts[3];
+	if (!id) { json(res, { error: "Missing CV id" }, 400); return; }
+
+	const chunks: Buffer[] = [];
+	for await (const chunk of req) {
+		chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+	}
+	const body = JSON.parse(Buffer.concat(chunks).toString());
+	const status = body.screeningStatus;
+
+	const validStatuses = ["pending", "shortlisted", "waitlisted", "rejected"];
+	if (!validStatuses.includes(status)) {
+		json(res, { error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` }, 400);
+		return;
+	}
+
+	const [row] = await db
+		.update(schema.researchRequests)
+		.set({ screeningStatus: status })
+		.where(eq(schema.researchRequests.id, id))
+		.returning({ id: schema.researchRequests.id, screeningStatus: schema.researchRequests.screeningStatus });
+
+	if (!row) { json(res, { error: "CV not found" }, 404); return; }
+	json(res, { cv: row });
+}
+
 /** POST /api/cv-upload — upload a CV file */
 async function uploadCv(req: IncomingMessage, res: ServerResponse) {
 	// Collect the raw body
@@ -339,9 +580,16 @@ async function uploadCv(req: IncomingMessage, res: ServerResponse) {
 
 	await mkdir(UPLOAD_DIR, { recursive: true });
 
+	// Extract jobOpeningId from URL query params
+	const uploadUrl = new URL(req.url ?? "/", "http://localhost");
+	const jobOpeningId = uploadUrl.searchParams.get("jobId")?.trim() || null;
+
 	const uploaded: { id: string; name: string }[] = [];
 
 	for (const part of parts) {
+		// Skip non-file parts (text form fields)
+		if (!part.filename) continue;
+
 		const fileId = randomUUID();
 		const safeFileName = part.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
 		const storagePath = join(UPLOAD_DIR, `${fileId}_${safeFileName}`);
@@ -351,6 +599,7 @@ async function uploadCv(req: IncomingMessage, res: ServerResponse) {
 		const [row] = await db
 			.insert(schema.researchRequests)
 			.values({
+				jobOpeningId: jobOpeningId,
 				telegramChatId: "web-upload",
 				status: "received",
 				originalFileName: part.filename,
@@ -568,6 +817,8 @@ const exactRoutes: Record<string, (req: IncomingMessage, res: ServerResponse) =>
 	"GET /api/dashboard/funnel": getFunnel,
 	"GET /api/cv-library": getCvLibrary,
 	"GET /api/cv-search": searchCvs,
+	"GET /api/jobs": getJobs,
+	"POST /api/jobs": createJob,
 	"POST /api/cv-upload": uploadCv,
 };
 
@@ -584,7 +835,10 @@ const server = createServer(async (req, res) => {
 	const key = `${req.method} ${path}`;
 	const handler = exactRoutes[key]
 		?? (req.method === "GET" && path.startsWith("/api/cv-file/") ? serveCvFile : undefined)
-		?? (req.method === "POST" && path.startsWith("/api/cv-research/") ? triggerResearch : undefined);
+		?? (req.method === "POST" && path.startsWith("/api/cv-research/") ? triggerResearch : undefined)
+		?? (req.method === "PATCH" && path.startsWith("/api/jobs/") ? updateJob : undefined)
+		?? (req.method === "PATCH" && path.match(/^\/api\/cv\/[^/]+\/screening$/) ? updateScreeningStatus : undefined)
+		?? (req.method === "GET" && path.match(/^\/api\/cv-profile\/[^/]+$/) ? getCvProfile : undefined);
 
 	if (handler) {
 		try {

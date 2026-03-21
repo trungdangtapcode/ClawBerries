@@ -44,9 +44,32 @@ export const overallRatingEnum = pgEnum("overall_rating", [
 	"red",
 ]);
 
+export const jobStatusEnum = pgEnum("job_status", [
+	"active",
+	"paused",
+	"closed",
+]);
+
+export const screeningStatusEnum = pgEnum("screening_status", [
+	"pending",
+	"shortlisted",
+	"waitlisted",
+	"rejected",
+]);
+
 // Tables
+export const jobOpenings = pgTable("job_openings", {
+	id: uuid().primaryKey().defaultRandom(),
+	title: varchar("title", { length: 255 }).notNull(),
+	department: varchar("department", { length: 255 }),
+	description: text("description"),
+	status: jobStatusEnum().notNull().default("active"),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 export const researchRequests = pgTable("research_requests", {
 	id: uuid().primaryKey().defaultRandom(),
+	jobOpeningId: uuid("job_opening_id").references(() => jobOpenings.id),
+	screeningStatus: screeningStatusEnum("screening_status").notNull().default("pending"),
 	telegramChatId: varchar("telegram_chat_id", { length: 64 }).notNull(),
 	telegramMessageId: integer("telegram_message_id"),
 	originalFileName: varchar("original_file_name", { length: 255 }),

@@ -5,6 +5,7 @@ import { CVSearch } from "@/pages/CVSearch"
 import { ResumeProfile } from "@/pages/ResumeProfile"
 import { Interviews } from "@/pages/Interviews"
 import { Documents } from "@/pages/Documents"
+import CandidateProfile from "@/pages/CandidateProfile"
 import "./index.css"
 
 function App() {
@@ -14,6 +15,7 @@ function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/cv-search" element={<CVSearch />} />
+          <Route path="/candidate/:id" element={<CandidateProfile />} />
           <Route path="/resume/:id" element={<ResumeProfile />} />
           {/* Placeholder routes for navigation items */}
           <Route path="/pipeline" element={<Dashboard />} />

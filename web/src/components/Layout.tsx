@@ -1,5 +1,5 @@
-import { useState } from "react"
-import { NavLink, Outlet, useLocation } from "react-router-dom"
+import { useState, useEffect } from "react"
+import { NavLink, Link, Outlet, useLocation, useSearchParams } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { Avatar } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -22,7 +22,7 @@ const mainNavItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/cv-search", icon: Search, label: "CV Search" },
   { to: "/interviews", icon: CalendarDays, label: "Interviews" },
-  { to: "/documents", icon: FileText, label: "Documents" },
+  { to: "/documents", icon: FileText, label: "Applicants" },
 ]
 
 const bottomNavItems = [
@@ -32,25 +32,50 @@ const bottomNavItems = [
 
 const topBarLinks: { to: string; label: string }[] = []
 
-function getBreadcrumb(pathname: string) {
-  const map: Record<string, string[]> = {
-    "/": ["Dashboard"],
-    "/cv-search": ["Dashboard", "CV Search"],
-    "/resume": ["Dashboard", "Candidate Pipeline", "Resume Profile"],
-    "/pipeline": ["Dashboard", "Candidate Pipeline"],
-    "/interviews": ["Dashboard", "Interviews"],
-    "/documents": ["Dashboard", "Documents"],
+interface Crumb { label: string; href?: string }
+
+function getBreadcrumb(pathname: string): Crumb[] {
+  const map: Record<string, Crumb[]> = {
+    "/": [{ label: "Dashboard" }],
+    "/cv-search": [{ label: "Dashboard", href: "/" }, { label: "CV Search", href: "/cv-search" }],
+    "/candidate": [{ label: "Dashboard", href: "/" }, { label: "CV Search", href: "/cv-search" }, { label: "Candidate Profile" }],
+    "/resume": [{ label: "Dashboard", href: "/" }, { label: "Candidate Pipeline", href: "/pipeline" }, { label: "Resume Profile" }],
+    "/pipeline": [{ label: "Dashboard", href: "/" }, { label: "Candidate Pipeline" }],
+    "/interviews": [{ label: "Dashboard", href: "/" }, { label: "Interviews" }],
+    "/documents": [{ label: "Dashboard", href: "/" }, { label: "Applicants" }],
   }
   const key = Object.keys(map).find((k) =>
     k === "/" ? pathname === "/" : pathname.startsWith(k)
   )
-  return map[key || "/"] || ["Dashboard"]
+  return map[key || "/"] || [{ label: "Dashboard" }]
 }
 
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
-  const breadcrumbs = getBreadcrumb(location.pathname)
+  const [searchParams] = useSearchParams()
+  const jobId = searchParams.get("jobId")
+  const [jobTitleForBreadcrumb, setJobTitleForBreadcrumb] = useState<string | null>(null)
+
+  const baseBreadcrumbs = getBreadcrumb(location.pathname)
+  const breadcrumbs: Crumb[] = jobId && jobTitleForBreadcrumb
+    ? [
+        ...baseBreadcrumbs.map(c => ({ ...c, href: c.href || undefined })),
+        { label: jobTitleForBreadcrumb, href: "/documents" },
+      ]
+    : baseBreadcrumbs
+
+  useEffect(() => {
+    if (!jobId) { setJobTitleForBreadcrumb(null); return }
+    const API = import.meta.env.VITE_API_URL || "http://localhost:3001"
+    fetch(`${API}/api/jobs`)
+      .then((r) => r.json())
+      .then((data) => {
+        const job = data.jobs?.find((j: any) => j.id === jobId)
+        setJobTitleForBreadcrumb(job?.title || null)
+      })
+      .catch(() => setJobTitleForBreadcrumb(null))
+  }, [jobId])
 
   return (
     <div className="flex h-screen overflow-hidden bg-surface">
@@ -149,17 +174,26 @@ export function Layout() {
           {/* Breadcrumb */}
           <div className="hidden items-center gap-1.5 text-sm md:flex">
             {breadcrumbs.map((crumb, idx) => (
-              <span key={crumb} className="flex items-center gap-1.5">
+              <span key={crumb.label} className="flex items-center gap-1.5">
                 {idx > 0 && <ChevronRight className="h-3.5 w-3.5 text-on-surface-variant/50" />}
-                <span
-                  className={cn(
-                    idx === breadcrumbs.length - 1
-                      ? "font-medium text-on-surface"
-                      : "text-on-surface-variant"
-                  )}
-                >
-                  {crumb}
-                </span>
+                {crumb.href ? (
+                  <Link
+                    to={crumb.href}
+                    className="text-on-surface-variant hover:text-primary hover:underline transition-colors"
+                  >
+                    {crumb.label}
+                  </Link>
+                ) : (
+                  <span
+                    className={cn(
+                      idx === breadcrumbs.length - 1
+                        ? "font-medium text-on-surface"
+                        : "text-on-surface-variant"
+                    )}
+                  >
+                    {crumb.label}
+                  </span>
+                )}
               </span>
             ))}
           </div>
