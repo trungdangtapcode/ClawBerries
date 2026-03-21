@@ -113,6 +113,9 @@ export const CANDIDATE_BRIEF_SCHEMA: Record<string, unknown> = {
 				skillsEvidence: {
 					type: "object",
 					description: "Mapping of skill name to true (found), false (not found), or null (not checked)",
+					additionalProperties: {
+						anyOf: [{ type: "boolean" }, { type: "null" }],
+					},
 				},
 			},
 			required: ["githubStats", "topLanguages", "skillsEvidence"],

@@ -10,6 +10,24 @@ import type {
 	WebSearchReport,
 } from "@/shared/types/research.js";
 
+// ─── Lightweight report types for publication & award agents ─────────────────
+
+export interface PublicationReport {
+	title: string;
+	found: boolean;
+	authorMatch: boolean | null;
+	venueVerified: boolean | null;
+	summary: string;
+}
+
+export interface AwardReport {
+	title: string;
+	found: boolean;
+	winnerMatch: boolean | null;
+	issuerVerified: boolean | null;
+	summary: string;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface ResearchBundle {
@@ -19,6 +37,8 @@ export interface ResearchBundle {
 	portfolioReports: PortfolioReport[];
 	employerReports: EmployerReport[];
 	webSearchReports: WebSearchReport[];
+	publicationReports: PublicationReport[];
+	awardReports: AwardReport[];
 	metadata: {
 		agentsSucceeded: number;
 		agentsFailed: number;
@@ -49,6 +69,8 @@ export async function assembleResearchBundle(
 	const portfolioReports: PortfolioReport[] = [];
 	const employerReports: EmployerReport[] = [];
 	const webSearchReports: WebSearchReport[] = [];
+	const publicationReports: PublicationReport[] = [];
+	const awardReports: AwardReport[] = [];
 
 	let succeeded = 0;
 	let failed = 0;
@@ -85,6 +107,12 @@ export async function assembleResearchBundle(
 				case "web_search":
 					webSearchReports.push(data as unknown as WebSearchReport);
 					break;
+				case "publication":
+					publicationReports.push(data as unknown as PublicationReport);
+					break;
+				case "award":
+					awardReports.push(data as unknown as AwardReport);
+					break;
 			}
 		} else if (row.status === "failed") {
 			failed++;
@@ -105,6 +133,8 @@ export async function assembleResearchBundle(
 		portfolioReports,
 		employerReports,
 		webSearchReports,
+		publicationReports,
+		awardReports,
 		metadata: {
 			agentsSucceeded: succeeded,
 			agentsFailed: failed,
@@ -300,6 +330,26 @@ export function serializeBundleForPrompt(bundle: ResearchBundle): string {
 			for (const m of (r.mentions ?? []).slice(0, 10)) {
 				sections.push(`    [${m.type}] ${m.title} — ${m.url}`);
 			}
+		}
+	}
+
+	if (bundle.publicationReports.length > 0) {
+		sections.push("\n-- Publication Verification --");
+		for (const r of bundle.publicationReports) {
+			sections.push(
+				`  "${r.title}": found=${r.found}, authorMatch=${r.authorMatch ?? "unknown"}, venueVerified=${r.venueVerified ?? "unknown"}`,
+			);
+			if (r.summary) sections.push(`    ${r.summary}`);
+		}
+	}
+
+	if (bundle.awardReports.length > 0) {
+		sections.push("\n-- Award Verification --");
+		for (const r of bundle.awardReports) {
+			sections.push(
+				`  "${r.title}": found=${r.found}, winnerMatch=${r.winnerMatch ?? "unknown"}, issuerVerified=${r.issuerVerified ?? "unknown"}`,
+			);
+			if (r.summary) sections.push(`    ${r.summary}`);
 		}
 	}
 

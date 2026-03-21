@@ -125,6 +125,8 @@ const mockBundle: ResearchBundle = {
 			summary: "1 mention, 1 conference, 1 award",
 		},
 	],
+	publicationReports: [],
+	awardReports: [],
 	metadata: {
 		agentsSucceeded: 3,
 		agentsFailed: 0,
