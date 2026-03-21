@@ -1,4 +1,6 @@
-import type { AgentPlan, CandidateProfile } from "@/shared/types/candidate.js";
+import type { PdfOcrResult } from "@/features/step3-step4/codex-pdf-ocr.js";
+import type { AgentPlan } from "@/shared/types/candidate.js";
+import { planAndDispatchAgents } from "@/features/step3-step4/index.js";
 
 /**
  * Step 4: Task Planning & Dispatch
@@ -7,13 +9,8 @@ import type { AgentPlan, CandidateProfile } from "@/shared/types/candidate.js";
  * to launch, and dispatches them in parallel.
  */
 export async function dispatchAgents(
-	_requestId: string,
-	_profile: CandidateProfile,
+	requestId: string,
+	ocrResult: PdfOcrResult,
 ): Promise<AgentPlan[]> {
-	// TODO: Evaluate available data points and build agent plan
-	// TODO: Check rate limits in Redis
-	// TODO: Dispatch agents in parallel via TinyFish
-	// TODO: Create agent tracking records in DB
-	// TODO: Set progress tracker in Redis
-	throw new Error("Not implemented");
+	return planAndDispatchAgents(requestId, ocrResult);
 }

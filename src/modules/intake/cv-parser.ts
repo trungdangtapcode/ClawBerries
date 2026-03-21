@@ -1,4 +1,5 @@
 import type { CandidateProfile } from "@/shared/types/candidate.js";
+import { parseCvFromBuffer } from "@/features/step3-step4/index.js";
 
 /**
  * Step 3: CV Parsing & Entity Extraction
@@ -7,12 +8,8 @@ import type { CandidateProfile } from "@/shared/types/candidate.js";
  * Supports PDF and DOCX via multimodal LLM extraction.
  */
 export async function parseCv(
-	_fileBuffer: Buffer,
-	_fileName: string,
+	fileBuffer: Buffer,
+	fileName: string,
 ): Promise<CandidateProfile> {
-	// TODO: Implement document conversion (PDF -> image, DOCX -> text)
-	// TODO: Run multimodal LLM extraction (Claude Sonnet with vision)
-	// TODO: Extract entities into CandidateProfile
-	// TODO: Validate extracted data (dates, email, phone, URLs)
-	throw new Error("Not implemented");
+	return parseCvFromBuffer(fileBuffer, fileName);
 }
