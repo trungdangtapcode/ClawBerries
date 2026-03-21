@@ -1,1 +1,17 @@
+# Claude
 .claude/**
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment
+.env
+
+# Database
+drizzle/
+
+# OS
+.DS_Store

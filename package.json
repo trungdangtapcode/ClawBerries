@@ -1,0 +1,41 @@
+{
+  "name": "clawberries",
+  "version": "0.1.0",
+  "description": "Automated Enterprise Lead Discovery & Outreach — Job Applicant Research Agent",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "check": "biome check .",
+    "check:fix": "biome check --fix .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.13.1",
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
+    "@types/node": "^25.5.0",
+    "@types/pg": "^8.20.0",
+    "drizzle-kit": "^0.31.10",
+    "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.1",
+    "grammy": "^1.41.1",
+    "ioredis": "^5.10.1",
+    "postgres": "^3.4.8",
+    "zod": "^4.3.6"
+  }
+}
