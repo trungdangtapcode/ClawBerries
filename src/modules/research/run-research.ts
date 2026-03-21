@@ -7,10 +7,7 @@ import type {
 	ResearchProgressState,
 } from "@/shared/types/research.js";
 import { callTinyFish } from "./tinyfish-client.js";
-
-/** 15-minute hard timeout — TinyFish runs take 40-65s each, with 2 concurrent
- *  slots. 14 agents / 2 × 90s worst-case ≈ 630s. 900s gives headroom. */
-const RESEARCH_TIMEOUT_MS = 900_000;
+import { config } from "@/shared/config/env.js";
 
 /** Max concurrent TinyFish SSE calls (matches TinyFish concurrency limit) */
 const MAX_CONCURRENCY = 2;
@@ -161,11 +158,11 @@ async function runSingleAgent(
 /**
  * Step 5: Parallel Research Execution
  *
- * Fires one callTinyFish per item concurrently (bulk-async pattern).
+ * Fires agents with a concurrency limit of MAX_CONCURRENCY (TinyFish cap).
  * Each item comes from Step 4's previewAgentTargets() output.
  * Results are written to agent_results (Postgres) and progress:{requestId} (Redis).
  *
- * Enforces a 120-second hard timeout across all concurrent calls.
+ * Enforces a configurable hard timeout (RESEARCH_TIMEOUT_MS env var, default 300s).
  */
 export async function runResearch(
 	requestId: string,
@@ -227,9 +224,9 @@ export async function runResearch(
 		MAX_CONCURRENCY,
 	);
 
-	// Hard 120-second deadline across ALL agents
+	// Hard deadline across ALL agents (configurable via RESEARCH_TIMEOUT_MS)
 	const globalTimeout = new Promise<void>((resolve) =>
-		setTimeout(() => resolve(), RESEARCH_TIMEOUT_MS),
+		setTimeout(() => resolve(), config.RESEARCH_TIMEOUT_MS),
 	);
 
 	await Promise.race([runAll, globalTimeout]);
@@ -249,7 +246,7 @@ export async function runResearch(
 					rowId,
 					"timeout",
 					undefined,
-					"120 s global deadline exceeded",
+					`global deadline exceeded (${config.RESEARCH_TIMEOUT_MS}ms)`,
 				);
 			}
 			await updateProgress(requestId, i, {

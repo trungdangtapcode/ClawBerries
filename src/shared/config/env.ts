@@ -27,6 +27,7 @@ const envSchema = z.object({
 
 	// TinyFish
 	TINYFISH_API_KEY: z.string().optional(),
+	RESEARCH_TIMEOUT_MS: z.coerce.number().default(300_000),
 });
 
 export type Env = z.infer<typeof envSchema>;

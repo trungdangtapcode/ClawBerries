@@ -43,10 +43,13 @@ if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
 		process.stdout.write(`[step 4] Planned ${items.length} agents:\n`);
 		process.stdout.write(
 			`${JSON.stringify(
-				items.map((item) => ({
-					type: item.agentType,
-					url: item.targetUrl,
-					profile: item.browserProfile,
+				items.map((item, i) => ({
+					_meta: { index: i, agentType: item.agentType, target: item.target, timeoutMs: item.timeout },
+					tinyfish_request: {
+						url: item.targetUrl,
+						goal: item.prompt,
+						browser_profile: item.browserProfile,
+					},
 				})),
 				null,
 				2,
