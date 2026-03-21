@@ -42,13 +42,13 @@ const RATE_LIMITS: Record<AgentPlan["type"], number> = {
 };
 
 const DEFAULT_TIMEOUTS_MS: Record<AgentPlan["type"], number> = {
-	linkedin: 45_000,
-	github: 30_000,
-	portfolio: 60_000,
-	employer: 45_000,
-	web_search: 30_000,
-	publication: 30_000,
-	award: 30_000,
+	linkedin: 240_000, // stealth — complex multi-step extraction
+	github: 180_000, // lite — but multi-step (repos, events, languages)
+	portfolio: 180_000, // stealth — JS rendering + project extraction
+	employer: 180_000, // stealth — registry + company page
+	web_search: 120_000, // lite — search + compile
+	publication: 120_000, // lite — scholar lookup
+	award: 120_000, // lite — verify on issuer site
 };
 
 const LOOK_FOR_CHECKS: Record<AgentPlan["type"], string[]> = {
@@ -103,13 +103,20 @@ const LOOK_FOR_CHECKS: Record<AgentPlan["type"], string[]> = {
 };
 
 const LOOK_FOR_PROMPTS: Record<AgentPlan["type"], string> = {
-	linkedin: "Verify name variants, current title/company, past roles and dates, and education against CV; flag title mismatch, missing employers, or unexplained date gaps over 3 months.",
-	github: "Check repo languages vs claimed skills, contribution activity in last 90 days, notable repos, and account age; flag skill mismatch or broken claimed GitHub links.",
-	portfolio: "Validate identity on site, compare projects and tech stack with CV claims, check freshness and outbound links; flag downtime, placeholder content, or stale portfolio.",
-	employer: "Verify company existence/status via registries, tax sources, and company profile signals; flag dissolved/not-found entities or implausible company-size claims.",
-	web_search: "Search public web for profile consistency, employer association, publications, talks, and awards; flag conflicting identity/company evidence or no public trace.",
-	publication: "Verify publication existence by title/venue/DOI, confirm candidate appears in author list, and validate venue credibility; flag title, author, or venue mismatch.",
-	award: "Verify award on issuer website for the claimed year and title, and confirm candidate appears in winners list; flag unverifiable award claims.",
+	linkedin:
+		"Verify name variants, current title/company, past roles and dates, and education against CV; flag title mismatch, missing employers, or unexplained date gaps over 3 months.",
+	github:
+		"Check repo languages vs claimed skills, contribution activity in last 90 days, notable repos, and account age; flag skill mismatch or broken claimed GitHub links.",
+	portfolio:
+		"Validate identity on site, compare projects and tech stack with CV claims, check freshness and outbound links; flag downtime, placeholder content, or stale portfolio.",
+	employer:
+		"Verify company existence/status via registries, tax sources, and company profile signals; flag dissolved/not-found entities or implausible company-size claims.",
+	web_search:
+		"Search public web for profile consistency, employer association, publications, talks, and awards; flag conflicting identity/company evidence or no public trace.",
+	publication:
+		"Verify publication existence by title/venue/DOI, confirm candidate appears in author list, and validate venue credibility; flag title, author, or venue mismatch.",
+	award:
+		"Verify award on issuer website for the claimed year and title, and confirm candidate appears in winners list; flag unverifiable award claims.",
 };
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -128,28 +135,107 @@ export async function planAndDispatchAgents(
 	return limitedAgents;
 }
 
-export function previewAgentTargets(ocrResult: PdfOcrResult): DispatchPreviewItem[] {
-	return planAgentTargets(ocrResult).map((plan) => ({
-		agentType: plan.type,
-		target: plan.target,
-		targetUrl: resolveTargetUrl(plan),
-		timeout: plan.timeout,
-		browserProfile: plan.browserProfile,
-		prompt: LOOK_FOR_PROMPTS[plan.type],
-	}));
+export function previewAgentTargets(
+	ocrResult: PdfOcrResult,
+): DispatchPreviewItem[] {
+	return planAgentTargets(ocrResult)
+		.map((plan) => {
+			const directUrl = resolveDirectUrl(plan);
+			return {
+				agentType: plan.type,
+				target: plan.target,
+				targetUrl: directUrl ?? "https://www.google.com",
+				timeout: plan.timeout,
+				browserProfile: plan.browserProfile,
+				prompt: directUrl
+					? LOOK_FOR_PROMPTS[plan.type]
+					: buildSearchGoal(plan),
+			};
+		})
+		.filter((item) => {
+			if (isFabricatedUrl(item.targetUrl)) {
+				console.warn(
+					`[dispatcher] skipping ${item.agentType} — fabricated URL detected: ${item.targetUrl}`,
+				);
+				return false;
+			}
+			return true;
+		});
 }
 
-function resolveTargetUrl(plan: AgentPlan): string {
-	const directUrl = plan.params.url as string | undefined;
-	if (directUrl) return directUrl;
+/** Returns the direct URL from the plan params, or null if none exists. */
+function resolveDirectUrl(plan: AgentPlan): string | null {
+	const url = plan.params.url as string | undefined;
+	return url ?? null;
+}
 
-	const q = encodeURIComponent(plan.target);
+/** Catch fabricated/placeholder URLs that LLMs sometimes generate */
+function isFabricatedUrl(url: string): boolean {
+	try {
+		const host = new URL(url).hostname.replace(/^www\./, "");
+		return host === "example.com" || host === "example.org" || host === "placeholder.com";
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Build a context-rich goal for agents that don't have a direct URL.
+ * TinyFish will start at google.com and reason about what to search.
+ */
+function buildSearchGoal(plan: AgentPlan): string {
+	const p = plan.params;
+
 	switch (plan.type) {
-		case "employer": return `https://www.google.com/search?q=${encodeURIComponent(`"${plan.params.companyName as string}" Vietnam company`)}`;
-		case "web_search": return `https://www.google.com/search?q=${q}`;
-		case "publication": return `https://scholar.google.com/scholar?q=${encodeURIComponent(plan.params.title as string)}`;
-		case "award": return `https://www.google.com/search?q=${encodeURIComponent(`"${plan.params.title as string}" ${plan.params.organization as string ?? ""} ${plan.params.date as string ?? ""} winner`.trim())}`;
-		default: return plan.target;
+		case "employer":
+			return [
+				`Search for the company "${p.companyName}" to verify it exists.`,
+				`Check: is it a real, active company? What industry? Approximate employee count?`,
+				p.candidateTitle ? `The candidate claims the role "${p.candidateTitle}".` : "",
+				p.startDate ? `Employment period: ${p.startDate} to ${(p.endDate as string) ?? "present"}.` : "",
+				`Return JSON: { companyName, verified, registrationStatus, estimatedHeadcount, industry, credibilityScore (0-100), redFlags[], summary }.`,
+			].filter(Boolean).join(" ");
+
+		case "web_search": {
+			const name = p.fullName as string;
+			const company = p.recentCompany as string | null;
+			const keywords = (p.keywords as string[]) ?? [];
+			return [
+				`Search for "${name}"${company ? ` who works/worked at "${company}"` : ""}.`,
+				`Find: LinkedIn profile, GitHub profile, conference talks, awards, publications, and any public mentions.`,
+				keywords.length > 0 ? `Skills/keywords to look for: ${keywords.join(", ")}.` : "",
+				`Return JSON: { candidateName, mentions: [{ url, title, type, snippet }], conferenceCount, awardCount, summary }.`,
+			].filter(Boolean).join(" ");
+		}
+
+		case "publication": {
+			const title = p.title as string;
+			const venue = p.venue as string | null;
+			const candidateName = p.candidateName as string;
+			return [
+				`Search Google Scholar or academic databases for the paper "${title}"${venue ? ` published at ${venue}` : ""}.`,
+				`Verify: does the paper exist? Is "${candidateName}" listed as an author?`,
+				`Check if the venue is a real, indexed conference or journal.`,
+				p.doi ? `DOI: ${p.doi}` : "",
+				`Return JSON: { title, found, authorMatch, venueVerified, summary }.`,
+			].filter(Boolean).join(" ");
+		}
+
+		case "award": {
+			const title = p.title as string;
+			const org = p.organization as string | null;
+			const date = p.date as string | null;
+			const candidateName = p.candidateName as string;
+			return [
+				`Search for the award/competition "${title}"${org ? ` organized by ${org}` : ""}${date ? ` in ${date}` : ""}.`,
+				`Find the official results page and verify if "${candidateName}" is listed as a winner.`,
+				p.rank ? `Claimed rank: ${p.rank}.` : "",
+				`Return JSON: { title, found, candidateListed, summary }.`,
+			].filter(Boolean).join(" ");
+		}
+
+		default:
+			return LOOK_FOR_PROMPTS[plan.type];
 	}
 }
 
@@ -160,7 +246,8 @@ export function planAgentTargets(ocrResult: PdfOcrResult): AgentPlan[] {
 	const links = dedupeLinksByType(ocrResult.links ?? []);
 	const workHistory = ocrResult.workHistory ?? [];
 	const companies = uniqueCompanies(workHistory).slice(0, 5);
-	const fullName = cleanText(ocrResult.identity?.fullName) ?? "Unknown Candidate";
+	const fullName =
+		cleanText(ocrResult.identity?.fullName) ?? "Unknown Candidate";
 	const nameVariants = uniqueStrings(ocrResult.identity?.nameVariants ?? []);
 	const recentCompany = companies[0] ?? null;
 	const claimOnlySkills = uniqueStrings(
@@ -168,13 +255,23 @@ export function planAgentTargets(ocrResult: PdfOcrResult): AgentPlan[] {
 			.filter((s) => s.evidencedBy === "claim_only")
 			.map((s) => s.name),
 	);
-	const publications = (ocrResult.publications ?? []).filter((p) => cleanText(p.title));
+	const publications = (ocrResult.publications ?? []).filter((p) =>
+		cleanText(p.title),
+	);
 	const awards = (ocrResult.awards ?? []).filter(
 		(a) => cleanText(a.title) || cleanText(a.organization),
 	);
 
 	for (const link of links.linkedin) {
-		agents.push(buildLinkedinPlan(link, fullName, nameVariants, workHistory, recentCompany));
+		agents.push(
+			buildLinkedinPlan(
+				link,
+				fullName,
+				nameVariants,
+				workHistory,
+				recentCompany,
+			),
+		);
 	}
 
 	for (const link of links.github) {
@@ -189,14 +286,21 @@ export function planAgentTargets(ocrResult: PdfOcrResult): AgentPlan[] {
 		agents.push(buildEmployerPlan(company, workHistory));
 	}
 
-	agents.push(buildWebSearchPlan(fullName, nameVariants, recentCompany, claimOnlySkills));
+	agents.push(
+		buildWebSearchPlan(fullName, nameVariants, recentCompany, claimOnlySkills),
+	);
 
 	for (const pub of publications) {
+		// Only dispatch if we have a direct URL or DOI — Scholar search is acceptable fallback
 		agents.push(buildPublicationPlan(pub, fullName, nameVariants));
 	}
 
 	for (const award of awards) {
-		agents.push(buildAwardPlan(award, fullName, nameVariants));
+		// Skip awards that have no direct URL and aren't publicly verifiable
+		// (e.g. personal certs like IELTS — Google search won't find results)
+		if (award.url || award.publiclyVerifiable) {
+			agents.push(buildAwardPlan(award, fullName, nameVariants));
+		}
 	}
 
 	return agents;
@@ -228,7 +332,10 @@ function buildLinkedinPlan(
 	};
 }
 
-function buildGithubPlan(link: LinkEntry, claimOnlySkills: string[]): AgentPlan {
+function buildGithubPlan(
+	link: LinkEntry,
+	claimOnlySkills: string[],
+): AgentPlan {
 	return {
 		type: "github",
 		target: link.href,
@@ -264,7 +371,10 @@ function buildPortfolioPlan(
 	};
 }
 
-function buildEmployerPlan(company: string, workHistory: WorkEntry[]): AgentPlan {
+function buildEmployerPlan(
+	company: string,
+	workHistory: WorkEntry[],
+): AgentPlan {
 	const entry = workHistory.find((w) => w.company === company);
 	return {
 		type: "employer",
@@ -273,6 +383,8 @@ function buildEmployerPlan(company: string, workHistory: WorkEntry[]): AgentPlan
 		browserProfile: BROWSER_PROFILES.employer,
 		params: {
 			companyName: company,
+			// Use the company website from the CV if available
+			url: entry?.companyUrl ?? null,
 			lookFor: LOOK_FOR_CHECKS.employer,
 			prompt: LOOK_FOR_PROMPTS.employer,
 			candidateTitle: entry?.title ?? null,
@@ -313,14 +425,16 @@ function buildPublicationPlan(
 	fullName: string,
 	nameVariants: string[],
 ): AgentPlan {
-	const target = pub.doi ? `https://doi.org/${pub.doi}` : (pub.title ?? "unknown publication");
+	// Prefer: CV url > DOI url > fall back to Scholar search
+	const directUrl = pub.url ?? (pub.doi ? `https://doi.org/${pub.doi}` : null);
+	const target = directUrl ?? (pub.title ?? "unknown publication");
 	return {
 		type: "publication",
 		target,
 		timeout: DEFAULT_TIMEOUTS_MS.publication,
 		browserProfile: BROWSER_PROFILES.publication,
 		params: {
-			url: pub.doi ? `https://doi.org/${pub.doi}` : null,
+			url: directUrl,
 			lookFor: LOOK_FOR_CHECKS.publication,
 			prompt: LOOK_FOR_PROMPTS.publication,
 			title: pub.title,
@@ -345,6 +459,8 @@ function buildAwardPlan(
 		timeout: DEFAULT_TIMEOUTS_MS.award,
 		browserProfile: BROWSER_PROFILES.award,
 		params: {
+			// Use direct URL from CV if available
+			url: award.url ?? null,
 			lookFor: LOOK_FOR_CHECKS.award,
 			prompt: LOOK_FOR_PROMPTS.award,
 			title: award.title,
@@ -365,20 +481,24 @@ async function applyRateLimits(plans: AgentPlan[]): Promise<AgentPlan[]> {
 	const allowed: AgentPlan[] = [];
 
 	for (const plan of plans) {
-		let current = counters[plan.type] ?? 0;
+		const current = counters[plan.type] ?? 0;
 		try {
 			// const key = `ratelimit:${plan.type}:${today}`;
 			// current = counters[plan.type] ?? (await getRedisCounter(key));
 			const limit = RATE_LIMITS[plan.type];
 			if (current >= limit) {
-				console.warn(`[dispatcher] rate limit reached for ${plan.type} (${current}/${limit}), skipping ${plan.target}`);
+				console.warn(
+					`[dispatcher] rate limit reached for ${plan.type} (${current}/${limit}), skipping ${plan.target}`,
+				);
 				continue;
 			}
 			counters[plan.type] = current + 1;
 			// await redis.incr(key);
 			// await redis.expireat(key, midnightUnix()); // resets at midnight UTC
 		} catch {
-			console.warn(`[dispatcher] Redis unavailable — skipping rate limit check for ${plan.type}`);
+			console.warn(
+				`[dispatcher] Redis unavailable — skipping rate limit check for ${plan.type}`,
+			);
 			counters[plan.type] = (counters[plan.type] ?? 0) + 1;
 		}
 		allowed.push(plan);
@@ -446,7 +566,10 @@ async function applyRateLimits(plans: AgentPlan[]): Promise<AgentPlan[]> {
 
 // ─── TinyFish Dispatch ────────────────────────────────────────────────────────
 
-async function dispatchToTinyFish(requestId: string, plans: AgentPlan[]): Promise<void> {
+async function dispatchToTinyFish(
+	requestId: string,
+	plans: AgentPlan[],
+): Promise<void> {
 	const apiUrl = process.env.TINYFISH_API_URL;
 	const apiKey = process.env.TINYFISH_API_KEY ?? "";
 
@@ -459,9 +582,13 @@ async function dispatchToTinyFish(requestId: string, plans: AgentPlan[]): Promis
 		plans.map((plan) => dispatchSingleAgent(apiUrl, apiKey, requestId, plan)),
 	);
 
-	const failed = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+	const failed = results.filter(
+		(r): r is PromiseRejectedResult => r.status === "rejected",
+	);
 	if (failed.length > 0) {
-		console.error(`[dispatcher] ${failed.length}/${plans.length} agents failed to dispatch`);
+		console.error(
+			`[dispatcher] ${failed.length}/${plans.length} agents failed to dispatch`,
+		);
 		for (const r of failed) console.error("[dispatcher]", r.reason);
 	}
 }
@@ -490,7 +617,9 @@ async function dispatchSingleAgent(
 
 	if (!response.ok) {
 		const body = await response.text();
-		throw new Error(`TinyFish dispatch failed for ${plan.type}:${plan.target} — ${response.status} ${body}`);
+		throw new Error(
+			`TinyFish dispatch failed for ${plan.type}:${plan.target} — ${response.status} ${body}`,
+		);
 	}
 }
 
@@ -502,9 +631,14 @@ function dedupeLinksByType(links: LinkEntry[]): {
 	portfolio: LinkEntry[];
 } {
 	const seen = new Set<string>();
-	const result = { linkedin: [] as LinkEntry[], github: [] as LinkEntry[], portfolio: [] as LinkEntry[] };
+	const result = {
+		linkedin: [] as LinkEntry[],
+		github: [] as LinkEntry[],
+		portfolio: [] as LinkEntry[],
+	};
 
 	for (const link of links) {
+		if (!link.href) continue;
 		const key = normalizeHref(link.href);
 		if (seen.has(key)) continue;
 		seen.add(key);

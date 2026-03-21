@@ -1,10 +1,14 @@
-import { config } from "@/shared/config/env.js";
-import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
-import { processPdfWithGemini } from "@/modules/parser/index.js";
-import { planAndDispatchAgents, previewAgentTargets } from "@/modules/parser/index.js";
-import { runResearch } from "@/modules/research/run-research.js";
+import { pathToFileURL } from "node:url";
+import {
+	planAndDispatchAgents,
+	previewAgentTargets,
+	processPdfWithGemini,
+} from "@/modules/parser/index.js";
 import { reportProgress } from "@/modules/research/progress.js";
+import { runResearch } from "@/modules/research/run-research.js";
+import { synthesize } from "@/modules/synthesis/synthesizer.js";
+import { config } from "@/shared/config/env.js";
 import { db, schema } from "@/shared/db/index.js";
 
 console.log(`ClawBerries starting in ${config.NODE_ENV} mode...`);
@@ -22,24 +26,37 @@ if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
 
 		// ── Step 3: Parse CV with Gemini ──────────────────────────────────────
 		process.stdout.write(`[step 3] Parsing CV: ${pdfPath}\n`);
-		const ocrResult = await processPdfWithGemini(pdfPath, "Extract all structured data from this CV.");
-		process.stdout.write(`[step 3] Done — extracted ${ocrResult.identity.fullName}\n`);
+		const ocrResult = await processPdfWithGemini(
+			pdfPath,
+			"Extract all structured data from this CV.",
+		);
+		process.stdout.write(
+			`[step 3] Done — extracted ${ocrResult.identity.fullName}\n`,
+		);
 
 		// ── Step 4: Plan agents from PdfOcrResult ─────────────────────────────
-		process.stdout.write(`[step 4] Planning agents (requestId: ${requestId})\n`);
+		process.stdout.write(
+			`[step 4] Planning agents (requestId: ${requestId})\n`,
+		);
 		await planAndDispatchAgents(requestId, ocrResult); // applies rate limits, logs warnings
-		const items = previewAgentTargets(ocrResult);      // pure plan — carries url+goal+browserProfile
+		const items = previewAgentTargets(ocrResult); // pure plan — carries url+goal+browserProfile
 		process.stdout.write(`[step 4] Planned ${items.length} agents:\n`);
 		process.stdout.write(
 			`${JSON.stringify(
-				items.map((item) => ({ type: item.agentType, url: item.targetUrl, profile: item.browserProfile })),
+				items.map((item) => ({
+					type: item.agentType,
+					url: item.targetUrl,
+					profile: item.browserProfile,
+				})),
 				null,
 				2,
 			)}\n`,
 		);
 
 		// ── Steps 5 + 6: Research + Progress reporting (concurrent) ───────────
-		process.stdout.write("[step 5+6] Starting parallel research and progress reporting...\n");
+		process.stdout.write(
+			"[step 5+6] Starting parallel research and progress reporting...\n",
+		);
 
 		const [row] = await db
 			.insert(schema.researchRequests)
@@ -54,6 +71,12 @@ if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
 		]);
 
 		process.stdout.write("[step 5+6] Research complete.\n");
+
+		// ── Step 7: LLM Synthesis & Cross-Referencing ────────────────────────
+		process.stdout.write("[step 7] Starting LLM synthesis...\n");
+		const brief = await synthesize(row!.id, ocrResult);
+		process.stdout.write(`[step 7] Done — ${brief.overallRating.toUpperCase()}\n`);
+		process.stdout.write(`\n${JSON.stringify(brief, null, 2)}\n`);
 	})().catch((error: unknown) => {
 		const message = error instanceof Error ? error.message : String(error);
 		process.stderr.write(`${message}\n`);

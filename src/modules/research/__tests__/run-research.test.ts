@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DispatchPreviewItem } from "@/modules/parser/dispatcher.js";
 
 // ─── Hoist shared mocks (must be before vi.mock calls, which are hoisted) ─────
@@ -8,7 +8,9 @@ const { callTinyFishMock, redisMock, dbMock, redisStore } = vi.hoisted(() => {
 
 	const redisMock = {
 		get: vi.fn(async (k: string) => redisStore.get(k) ?? null),
-		set: vi.fn(async (k: string, v: string) => { redisStore.set(k, v); }),
+		set: vi.fn(async (k: string, v: string) => {
+			redisStore.set(k, v);
+		}),
 	};
 
 	// Chainable db mock — insert/update chains must survive clearAllMocks
@@ -18,7 +20,11 @@ const { callTinyFishMock, redisMock, dbMock, redisStore } = vi.hoisted(() => {
 	const makeInsertChain = (rows: unknown[]) => ({
 		values: vi.fn(() => ({
 			returning: vi.fn(() =>
-				Promise.resolve((rows as unknown[]).map((_: unknown, i: number) => ({ id: `row-${i}` }))),
+				Promise.resolve(
+					(rows as unknown[]).map((_: unknown, i: number) => ({
+						id: `row-${i}`,
+					})),
+				),
 			),
 		})),
 	});
@@ -121,7 +127,11 @@ describe("runResearch", () => {
 		dbMock.insert.mockImplementation((() => ({
 			values: vi.fn((rows: unknown[]) => ({
 				returning: vi.fn(() =>
-					Promise.resolve((rows as unknown[]).map((_: unknown, i: number) => ({ id: `row-${i}` }))),
+					Promise.resolve(
+						(rows as unknown[]).map((_: unknown, i: number) => ({
+							id: `row-${i}`,
+						})),
+					),
 				),
 			})),
 		})) as unknown as typeof dbMock.insert);
@@ -136,11 +146,19 @@ describe("runResearch", () => {
 		expect(callTinyFishMock).toHaveBeenCalledTimes(baseItems.length);
 
 		expect(callTinyFishMock).toHaveBeenCalledWith(
-			expect.objectContaining({ url: linkedinItem.targetUrl, goal: linkedinItem.prompt, browser_profile: "stealth" }),
+			expect.objectContaining({
+				url: linkedinItem.targetUrl,
+				goal: linkedinItem.prompt,
+				browser_profile: "stealth",
+			}),
 			expect.anything(), // AbortSignal
 		);
 		expect(callTinyFishMock).toHaveBeenCalledWith(
-			expect.objectContaining({ url: githubItem.targetUrl, goal: githubItem.prompt, browser_profile: "lite" }),
+			expect.objectContaining({
+				url: githubItem.targetUrl,
+				goal: githubItem.prompt,
+				browser_profile: "lite",
+			}),
 			expect.anything(),
 		);
 	});
@@ -189,10 +207,17 @@ describe("runResearch", () => {
 		let capturedRows: Array<{ agentType: string; agentTarget: string }> = [];
 		dbMock.insert.mockImplementation((() => ({
 			values: vi.fn((rows: unknown[]) => {
-				capturedRows = rows as Array<{ agentType: string; agentTarget: string }>;
+				capturedRows = rows as Array<{
+					agentType: string;
+					agentTarget: string;
+				}>;
 				return {
 					returning: vi.fn(() =>
-						Promise.resolve((rows as unknown[]).map((_: unknown, i: number) => ({ id: `row-${i}` }))),
+						Promise.resolve(
+							(rows as unknown[]).map((_: unknown, i: number) => ({
+								id: `row-${i}`,
+							})),
+						),
 					),
 				};
 			}),
@@ -202,8 +227,14 @@ describe("runResearch", () => {
 
 		expect(capturedRows).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ agentType: "linkedin", agentTarget: linkedinItem.target }),
-				expect.objectContaining({ agentType: "github", agentTarget: githubItem.target }),
+				expect.objectContaining({
+					agentType: "linkedin",
+					agentTarget: linkedinItem.target,
+				}),
+				expect.objectContaining({
+					agentType: "github",
+					agentTarget: githubItem.target,
+				}),
 			]),
 		);
 	});

@@ -1,2 +1,7 @@
-export { synthesize } from "./synthesizer.js";
 export { formatBrief } from "./formatter.js";
+export type { ResearchBundle } from "./research-bundle.js";
+export {
+	assembleResearchBundle,
+	serializeBundleForPrompt,
+} from "./research-bundle.js";
+export { synthesize } from "./synthesizer.js";

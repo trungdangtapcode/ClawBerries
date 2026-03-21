@@ -1,5 +1,5 @@
-import { redis } from "@/shared/redis/index.js";
 import { config } from "@/shared/config/env.js";
+import { redis } from "@/shared/redis/index.js";
 import type { ResearchProgressState } from "@/shared/types/research.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -13,22 +13,22 @@ const PROGRESS_KEY = (requestId: string) => `progress:${requestId}`;
 
 // ─── Telegram sender ──────────────────────────────────────────────────────────
 
-async function sendTelegramMessage(chatId: string, text: string): Promise<void> {
+async function sendTelegramMessage(
+	chatId: string,
+	text: string,
+): Promise<void> {
 	const token = config.TELEGRAM_BOT_TOKEN;
 	if (!token) return; // no-op in environments without a bot token
 
-	await fetch(
-		`https://api.telegram.org/bot${token}/sendMessage`,
-		{
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				chat_id: chatId,
-				text,
-				parse_mode: "HTML",
-			}),
-		},
-	);
+	await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			chat_id: chatId,
+			text,
+			parse_mode: "HTML",
+		}),
+	});
 }
 
 // ─── Message builder ──────────────────────────────────────────────────────────
@@ -41,9 +41,8 @@ function buildProgressMessage(state: ResearchProgressState): string {
 
 	for (const agent of state.agents) {
 		const label = agent.agentType.replace("_", " ");
-		const target = agent.target.length > 40
-			? `${agent.target.slice(0, 37)}…`
-			: agent.target;
+		const target =
+			agent.target.length > 40 ? `${agent.target.slice(0, 37)}…` : agent.target;
 
 		if (agent.status === "completed") {
 			lines.push(`✅ <b>${label}</b> — ${agent.summary ?? target}`);

@@ -1,5 +1,5 @@
-import { callTinyFish } from "../tinyfish-client.js";
 import type { WebSearchReport } from "@/shared/types/research.js";
+import { callTinyFish } from "../tinyfish-client.js";
 
 const TIMEOUT_MS = 30_000;
 
@@ -49,7 +49,9 @@ Return structured JSON with:
 			mentions: raw.mentions ?? [],
 			conferenceCount: raw.conferenceCount ?? 0,
 			awardCount: raw.awardCount ?? 0,
-			summary: raw.summary ?? `Web search: ${raw.mentions?.length ?? 0} mentions found`,
+			summary:
+				raw.summary ??
+				`Web search: ${raw.mentions?.length ?? 0} mentions found`,
 		};
 	} finally {
 		clearTimeout(timer);
