@@ -52,14 +52,16 @@ docker-compose up -d
 
 # 3. Set up environment
 cp .env.example .env
-# Fill in GEMINI_API_KEY, TELEGRAM_BOT_TOKEN, TINYFISH_API_KEY
+# Fill in GEMINI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_HR_CHAT_ID, TINYFISH_API_KEY
 
 # 4. Run database migrations
 pnpm db:migrate
 
-# 5. Run the pipeline on a CV
-set -a; source .env; set +a
-pnpm tsx src/index.ts "/path/to/cv.pdf"
+# 5. Install the global CLI
+pnpm link --global
+
+# 6. Run the pipeline on a CV (works from anywhere)
+clawberries run "/path/to/cv.pdf"
 ```
 
 ### Environment Variables
@@ -296,7 +298,20 @@ Defined in `src/shared/db/schema.ts`:
 
 ---
 
-## Scripts
+## CLI (global)
+
+After `pnpm link --global`:
+
+```bash
+clawberries run <cv.pdf>       # Run verification pipeline (async, returns requestId)
+clawberries status <requestId> # Check pipeline progress
+clawberries report <requestId> # Get the final candidate brief
+clawberries cancel <requestId> # Cancel a running pipeline
+clawberries serve              # Start webhook server for Google Form
+clawberries install-skill      # Install OpenClaw skill
+```
+
+## Dev Scripts
 
 ```bash
 pnpm dev              # Start with tsx watch (auto-reload)

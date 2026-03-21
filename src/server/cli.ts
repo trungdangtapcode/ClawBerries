@@ -181,24 +181,18 @@ async function cmdCancel(requestId: string): Promise<void> {
 // ─── Subcommand: install-skill ───────────────────────────────────────────────
 
 async function cmdInstallSkill(): Promise<void> {
-	const { readFileSync, writeFileSync, mkdirSync } = await import("node:fs");
+	const { cpSync, mkdirSync } = await import("node:fs");
 	const { join } = await import("node:path");
 	const { homedir } = await import("node:os");
 
-	const projectDir = process.cwd();
-	const src = join(projectDir, "docs", "openclaw-skill", "SKILL.md");
+	const src = join(process.cwd(), "docs", "openclaw-skill", "SKILL.md");
 	const destDir = join(homedir(), ".openclaw", "skills", "clawberries");
 	const dest = join(destDir, "SKILL.md");
 
-	// Read template and replace placeholder with actual project path
-	let content = readFileSync(src, "utf-8");
-	content = content.replace(/__CLAWBERRIES_DIR__/g, projectDir);
-
 	mkdirSync(destDir, { recursive: true });
-	writeFileSync(dest, content);
+	cpSync(src, dest);
 
 	process.stdout.write(`Installed ClawBerries skill to ${dest}\n`);
-	process.stdout.write(`Project path set to: ${projectDir}\n`);
 	process.stdout.write("Restart OpenClaw to pick it up: openclaw gateway restart\n");
 }
 
