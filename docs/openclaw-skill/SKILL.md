@@ -2,33 +2,19 @@
 name: clawberries
 description: "Job applicant research agent. Verify CVs by cross-referencing claims against LinkedIn, GitHub, and the web. Use when HR wants to screen a candidate, check verification status, or retrieve a candidate report."
 user-invocable: true
-metadata: {"openclaw": {"requires": {"bins": ["pnpm"]}, "os": ["darwin", "linux"]}}
+metadata: {"openclaw": {"requires": {"bins": ["clawberries"]}, "os": ["darwin", "linux"]}}
 ---
 
 # ClawBerries — Job Applicant Research Agent
 
-You are managing an automated CV verification pipeline. When HR sends a CV or asks to verify a candidate, use the ClawBerries CLI.
-
-## Setup
-
-All commands use `pnpm cli` which is an alias defined in the ClawBerries project. The project path is:
-
-```
-__CLAWBERRIES_DIR__
-```
-
-Run all commands as:
-
-```bash
-pnpm --dir __CLAWBERRIES_DIR__ cli <command> [args]
-```
+You are managing an automated CV verification pipeline. When HR sends a CV or asks to verify a candidate, use the `clawberries` CLI.
 
 ## Commands
 
 ### 1. Run verification on a CV file
 
 ```bash
-pnpm --dir __CLAWBERRIES_DIR__ cli run "<path-to-cv.pdf>"
+clawberries run "<path-to-cv.pdf>"
 ```
 
 Returns `{ requestId }` immediately. The pipeline runs asynchronously in the background.
@@ -36,7 +22,7 @@ Returns `{ requestId }` immediately. The pipeline runs asynchronously in the bac
 ### 2. Check pipeline status
 
 ```bash
-pnpm --dir __CLAWBERRIES_DIR__ cli status "<requestId>"
+clawberries status "<requestId>"
 ```
 
 Returns JSON with `status` ("parsing", "researching", "synthesizing", "delivered", "failed") and agent progress.
@@ -44,7 +30,7 @@ Returns JSON with `status` ("parsing", "researching", "synthesizing", "delivered
 ### 3. Get the final report
 
 ```bash
-pnpm --dir __CLAWBERRIES_DIR__ cli report "<requestId>"
+clawberries report "<requestId>"
 ```
 
 Returns the full candidate brief (CV validity score, verified claims, inconsistencies, gaps, interview questions, overall GREEN/YELLOW/RED rating).
@@ -52,15 +38,15 @@ Returns the full candidate brief (CV validity score, verified claims, inconsiste
 ### 4. Cancel a running pipeline
 
 ```bash
-pnpm --dir __CLAWBERRIES_DIR__ cli cancel "<requestId>"
+clawberries cancel "<requestId>"
 ```
 
-Cancels any in-flight TinyFish runs and marks the request as failed.
+Cancels any in-flight agents and marks the request as failed.
 
 ### 5. Start the webhook server
 
 ```bash
-pnpm --dir __CLAWBERRIES_DIR__ cli serve
+clawberries serve
 ```
 
 Starts the HTTP server for Google Form submissions.
@@ -80,13 +66,13 @@ The verification pipeline takes 3-10 minutes. Do NOT block waiting for it.
 
 When HR clicks "Verify Now" (`cb_run`):
 
-1. Run the `run` command — returns `{ requestId }` immediately
+1. Run `clawberries run <cv-path>` — returns `{ requestId }` immediately
 2. Tell HR: "Verification started. I'll check back when it's done. Request ID: [id]"
 3. **Do NOT wait.** End the current response. Move on to other tasks.
 
 Later, when HR asks for results or you want to check:
-1. Run `status <requestId>` to check if it's done
-2. If status is "delivered", run `report <requestId>` and present results
+1. Run `clawberries status <requestId>` to check if it's done
+2. If status is "delivered", run `clawberries report <requestId>` and present results
 3. If status is "researching" or "synthesizing", tell HR it's still running
 4. If status is "failed", tell HR and suggest retrying
 
@@ -106,4 +92,3 @@ Keep it concise for Telegram. Summarize top findings and offer to show details.
 
 - Docker must be running (Postgres + Redis containers)
 - `.env` file must have: GEMINI_API_KEY, TINYFISH_API_KEY, DATABASE_URL, REDIS_URL
-- The webhook server must be running for Google Form submissions
