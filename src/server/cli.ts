@@ -63,7 +63,14 @@ async function cmdRun(cvPath: string): Promise<void> {
 					.where(eq(schema.researchRequests.id, requestId));
 			}
 		})
-		.catch((err) => console.error("[run] Pipeline failed:", err));
+		.catch(async (err) => {
+			console.error("[run] Pipeline failed:", err);
+			await db
+				.update(schema.researchRequests)
+				.set({ status: "failed", completedAt: new Date() })
+				.where(eq(schema.researchRequests.id, requestId))
+				.catch(() => {}); // best-effort DB update
+		});
 
 	// Return immediately
 	process.stdout.write(JSON.stringify({ requestId }) + "\n");
@@ -145,29 +152,53 @@ async function cmdReport(requestId: string): Promise<void> {
 // ─── Subcommand: cancel ──────────────────────────────────────────────────────
 
 async function cmdCancel(requestId: string): Promise<void> {
+	// Mark any running agents as cancelled in DB
+	const agents = await db
+		.select()
+		.from(schema.agentResults)
+		.where(eq(schema.agentResults.requestId, requestId));
+
+	let cancelledCount = 0;
+	for (const agent of agents) {
+		if (agent.status === "running" || agent.status === "pending") {
+			await db
+				.update(schema.agentResults)
+				.set({ status: "timeout", errorMessage: "cancelled by user", completedAt: new Date() })
+				.where(eq(schema.agentResults.id, agent.id));
+			cancelledCount++;
+		}
+	}
+
+	// Mark the request as failed
 	await db
 		.update(schema.researchRequests)
 		.set({ status: "failed", completedAt: new Date() })
 		.where(eq(schema.researchRequests.id, requestId));
 
-	process.stdout.write(JSON.stringify({ requestId, cancelled: true }) + "\n");
+	process.stdout.write(JSON.stringify({ requestId, cancelled: true, agentsCancelled: cancelledCount }) + "\n");
 }
 
 // ─── Subcommand: install-skill ───────────────────────────────────────────────
 
 async function cmdInstallSkill(): Promise<void> {
-	const { cpSync, mkdirSync } = await import("node:fs");
+	const { readFileSync, writeFileSync, mkdirSync } = await import("node:fs");
 	const { join } = await import("node:path");
 	const { homedir } = await import("node:os");
 
-	const src = join(process.cwd(), "docs", "openclaw-skill", "SKILL.md");
+	const projectDir = process.cwd();
+	const src = join(projectDir, "docs", "openclaw-skill", "SKILL.md");
 	const destDir = join(homedir(), ".openclaw", "skills", "clawberries");
 	const dest = join(destDir, "SKILL.md");
 
+	// Read template and replace placeholder with actual project path
+	let content = readFileSync(src, "utf-8");
+	content = content.replace(/__CLAWBERRIES_DIR__/g, projectDir);
+
 	mkdirSync(destDir, { recursive: true });
-	cpSync(src, dest);
+	writeFileSync(dest, content);
 
 	process.stdout.write(`Installed ClawBerries skill to ${dest}\n`);
+	process.stdout.write(`Project path set to: ${projectDir}\n`);
 	process.stdout.write("Restart OpenClaw to pick it up: openclaw gateway restart\n");
 }
 
