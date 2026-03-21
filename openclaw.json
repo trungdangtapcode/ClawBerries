@@ -50,7 +50,7 @@
     "telegram": {
       "enabled": true,
       "dmPolicy": "pairing",
-      "botToken": "8707432625:AAEKR24qvqD-ZP_yB33JsEMIdk6kFum_HME",
+      "botToken": "${TELEGRAM_BOT_TOKEN}",
       "groups": {
         "*": {
           "requireMention": false
@@ -66,7 +66,7 @@
     "bind": "loopback",
     "auth": {
       "mode": "token",
-      "token": "982d3a5d5371306a13eb30ab4617cd269e69989bc001cd3f"
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
     },
     "tailscale": {
       "mode": "off",
@@ -82,7 +82,7 @@
   },
   "hooks": {
     "enabled": true,
-    "token": "abc123",
+    "token": "${OPENCLAW_HOOK_TOKEN}",
     "mappings": [
       {
         "match": { "path": "tally" },

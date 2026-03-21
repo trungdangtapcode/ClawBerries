@@ -8,7 +8,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import express from "express";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import postgres from "postgres";
 import { pgTable, uuid, varchar, text, timestamp } from "drizzle-orm/pg-core";
 
@@ -156,7 +156,7 @@ async function sendTelegramMessage(chatId: string, text: string): Promise<void> 
 
 function runPipeline(pdfPath: string): Promise<{ ok: boolean; output: string }> {
 	return new Promise((resolve) => {
-		const proc = spawn("pnpm", ["dev", pdfPath], {
+		const proc = spawn("pnpm", ["tsx", "--env-file=.env", "src/index.ts", pdfPath], {
 			cwd: PIPELINE_DIR,
 			env: { ...process.env, NODE_ENV: "development" },
 			shell: true,
@@ -318,6 +318,13 @@ app.post("/webhook", async (req, res) => {
 // ─── /checkcv endpoint (called via Telegram bot or API) ──────────────────────
 
 app.post("/checkcv", async (req, res) => {
+	// Auth: require token via header or query param
+	const token = req.headers["x-hook-token"] ?? req.query.token;
+	if (!OPENCLAW_HOOK_TOKEN || token !== OPENCLAW_HOOK_TOKEN) {
+		res.status(401).json({ error: "unauthorized" });
+		return;
+	}
+
 	const { email, chat_id } = req.body as { email?: string; chat_id?: string };
 	const chatId = chat_id || TELEGRAM_CHAT_ID;
 
@@ -330,7 +337,7 @@ app.post("/checkcv", async (req, res) => {
 		.select()
 		.from(formSubmissions)
 		.where(eq(formSubmissions.email, email))
-		.orderBy(formSubmissions.createdAt)
+		.orderBy(desc(formSubmissions.createdAt))
 		.limit(1);
 
 	if (rows.length === 0) {
