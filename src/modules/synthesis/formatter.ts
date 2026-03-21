@@ -9,7 +9,11 @@ import type { CandidateBrief } from "@/shared/types/candidate.js";
 export async function formatBrief(
 	_brief: CandidateBrief,
 	_researchDurationMs: number,
-): Promise<{ telegram: string; telegramChunks: string[]; pdfUrl: string | null }> {
+): Promise<{
+	telegram: string;
+	telegramChunks: string[];
+	pdfUrl: string | null;
+}> {
 	// TODO: Apply Telegram-optimized template (scannable in 30s)
 	// TODO: Generate styled PDF with screenshots
 	// TODO: Store brief in S3, generate signed URL (24h expiry)

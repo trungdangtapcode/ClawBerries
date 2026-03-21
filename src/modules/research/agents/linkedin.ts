@@ -1,5 +1,5 @@
-import { callTinyFish } from "../tinyfish-client.js";
 import type { LinkedInReport } from "@/shared/types/research.js";
+import { callTinyFish } from "../tinyfish-client.js";
 
 const TIMEOUT_MS = 45_000;
 
@@ -41,7 +41,9 @@ export async function runLinkedInAgent(
 			endorsementsCount: raw.endorsementsCount ?? 0,
 			recommendationsCount: raw.recommendationsCount ?? 0,
 			discrepancies: raw.discrepancies ?? [],
-			summary: raw.summary ?? `LinkedIn profile extracted — ${raw.positions?.length ?? 0} positions found`,
+			summary:
+				raw.summary ??
+				`LinkedIn profile extracted — ${raw.positions?.length ?? 0} positions found`,
 		};
 	} finally {
 		clearTimeout(timer);

@@ -1,5 +1,5 @@
-import { resolve } from "node:path";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 /** Minimal .env loader — avoids adding a dotenv dependency */
 function loadDotenv(): void {
@@ -12,7 +12,10 @@ function loadDotenv(): void {
 			const eqIdx = trimmed.indexOf("=");
 			if (eqIdx === -1) continue;
 			const key = trimmed.slice(0, eqIdx).trim();
-			const value = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
+			const value = trimmed
+				.slice(eqIdx + 1)
+				.trim()
+				.replace(/^["']|["']$/g, "");
 			// Only set if not already defined in environment
 			if (key && !(key in process.env)) {
 				process.env[key] = value;
@@ -35,7 +38,8 @@ export async function setup(): Promise<void> {
 	// These must be set before any test file imports modules that read process.env at load time
 	process.env.NODE_ENV = "test";
 	// TINYFISH_API_KEY is read from .env — do not override here
-	process.env.TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "test-token-integration";
+	process.env.TELEGRAM_BOT_TOKEN =
+		process.env.TELEGRAM_BOT_TOKEN ?? "test-token-integration";
 	process.env.DATABASE_URL =
 		process.env.DATABASE_URL ??
 		"postgres://clawberries:clawberries@localhost:5432/clawberries";

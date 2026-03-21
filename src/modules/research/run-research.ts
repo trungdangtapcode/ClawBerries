@@ -1,18 +1,51 @@
-import { db, schema } from "@/shared/db/index.js";
-import { redis } from "@/shared/redis/index.js";
 import { eq } from "drizzle-orm";
 import type { DispatchPreviewItem } from "@/modules/parser/dispatcher.js";
+import { db, schema } from "@/shared/db/index.js";
+import { redis } from "@/shared/redis/index.js";
 import type {
 	AgentProgressItem,
 	ResearchProgressState,
 } from "@/shared/types/research.js";
-import { callTinyFish } from "./tinyfish-client.js";
+import { config } from "@/shared/config/env.js";
+import { callResearchAgent } from "./research-client.js";
 
-/** 120-second hard timeout for the entire research phase */
-const RESEARCH_TIMEOUT_MS = 120_000;
+/** Max concurrent TinyFish SSE calls (matches TinyFish concurrency limit) */
+const MAX_CONCURRENCY = 2;
 
 const PROGRESS_KEY = (requestId: string) => `progress:${requestId}`;
 const PROGRESS_TTL_SECONDS = 600;
+
+// ─── Concurrency limiter ──────────────────────────────────────────────────────
+
+/**
+ * Run an array of async task factories with at most `limit` running at a time.
+ * Returns a Promise that resolves when ALL tasks have settled.
+ */
+function runWithConcurrency(
+	tasks: Array<() => Promise<void>>,
+	limit: number,
+): Promise<PromiseSettledResult<void>[]> {
+	const results: PromiseSettledResult<void>[] = [];
+	let nextIndex = 0;
+
+	async function runNext(): Promise<void> {
+		while (nextIndex < tasks.length) {
+			const idx = nextIndex++;
+			const task = tasks[idx]!;
+			try {
+				await task();
+				results[idx] = { status: "fulfilled", value: undefined };
+			} catch (reason) {
+				results[idx] = { status: "rejected", reason };
+			}
+		}
+	}
+
+	const workers = Array.from({ length: Math.min(limit, tasks.length) }, () =>
+		runNext(),
+	);
+	return Promise.all(workers).then(() => results);
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -36,7 +69,9 @@ async function updateAgentDb(
 async function updateProgress(
 	requestId: string,
 	agentIndex: number,
-	patch: Partial<AgentProgressItem> & { outcome: "completed" | "failed" | "timeout" },
+	patch: Partial<AgentProgressItem> & {
+		outcome: "completed" | "failed" | "timeout";
+	},
 ): Promise<void> {
 	const key = PROGRESS_KEY(requestId);
 	const raw = await redis.get(key);
@@ -50,8 +85,12 @@ async function updateProgress(
 
 	const agent = state.agents[agentIndex];
 	if (agent) {
-		agent.status = patch.outcome === "completed" ? "completed"
-			: patch.outcome === "failed" ? "failed" : "timeout";
+		agent.status =
+			patch.outcome === "completed"
+				? "completed"
+				: patch.outcome === "failed"
+					? "failed"
+					: "timeout";
 		agent.summary = patch.summary ?? null;
 		agent.durationMs = patch.durationMs ?? null;
 	}
@@ -76,7 +115,7 @@ async function runSingleAgent(
 	const timer = setTimeout(() => controller.abort(), item.timeout);
 
 	try {
-		const { result } = await callTinyFish(
+		const { result } = await callResearchAgent(
 			{
 				url: item.targetUrl,
 				goal: item.prompt,
@@ -88,7 +127,11 @@ async function runSingleAgent(
 		clearTimeout(timer);
 		const durationMs = Date.now() - start;
 
-		await updateAgentDb(dbRowId, "completed", result as Record<string, unknown>);
+		await updateAgentDb(
+			dbRowId,
+			"completed",
+			result as Record<string, unknown>,
+		);
 		await updateProgress(requestId, agentIndex, {
 			outcome: "completed",
 			summary: (result as { summary?: string }).summary ?? null,
@@ -101,6 +144,7 @@ async function runSingleAgent(
 		const status = isTimeout ? "timeout" : "failed";
 		const message = err instanceof Error ? err.message : String(err);
 
+		console.error(`[agent ${agentIndex}] ${status}: ${message}`);
 		await updateAgentDb(dbRowId, status, undefined, message);
 		await updateProgress(requestId, agentIndex, {
 			outcome: status,
@@ -115,11 +159,11 @@ async function runSingleAgent(
 /**
  * Step 5: Parallel Research Execution
  *
- * Fires one callTinyFish per item concurrently (bulk-async pattern).
+ * Fires agents with a concurrency limit of MAX_CONCURRENCY (TinyFish cap).
  * Each item comes from Step 4's previewAgentTargets() output.
  * Results are written to agent_results (Postgres) and progress:{requestId} (Redis).
  *
- * Enforces a 120-second hard timeout across all concurrent calls.
+ * Enforces a configurable hard timeout (RESEARCH_TIMEOUT_MS env var, default 300s).
  */
 export async function runResearch(
 	requestId: string,
@@ -172,17 +216,18 @@ export async function runResearch(
 		.set({ status: "researching" })
 		.where(eq(schema.researchRequests.id, requestId));
 
-	// 4. Fire all agents concurrently — one callTinyFish per item (bulk-async pattern)
+	// 4. Fire agents with concurrency limit (TinyFish allows only 2 concurrent runs).
 	//    Each call manages its own per-agent AbortController via item.timeout.
-	const runAll = Promise.allSettled(
-		items.map((item, idx) =>
+	const runAll = runWithConcurrency(
+		items.map((item, idx) => () =>
 			runSingleAgent(requestId, item, idx, rowIds[idx] as string),
 		),
+		MAX_CONCURRENCY,
 	);
 
-	// Hard 120-second deadline across ALL agents
+	// Hard deadline across ALL agents (configurable via RESEARCH_TIMEOUT_MS)
 	const globalTimeout = new Promise<void>((resolve) =>
-		setTimeout(() => resolve(), RESEARCH_TIMEOUT_MS),
+		setTimeout(() => resolve(), config.RESEARCH_TIMEOUT_MS),
 	);
 
 	await Promise.race([runAll, globalTimeout]);
@@ -198,9 +243,17 @@ export async function runResearch(
 		for (const { i } of stillRunning) {
 			const rowId = rowIds[i];
 			if (rowId) {
-				await updateAgentDb(rowId, "timeout", undefined, "120 s global deadline exceeded");
+				await updateAgentDb(
+					rowId,
+					"timeout",
+					undefined,
+					`global deadline exceeded (${config.RESEARCH_TIMEOUT_MS}ms)`,
+				);
 			}
-			await updateProgress(requestId, i, { outcome: "timeout", summary: "global timeout" });
+			await updateProgress(requestId, i, {
+				outcome: "timeout",
+				summary: "global timeout",
+			});
 		}
 	}
 }

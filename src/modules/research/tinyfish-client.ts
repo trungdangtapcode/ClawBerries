@@ -87,6 +87,24 @@ async function* parseSseStream(
 	}
 }
 
+// ─── Cancel ───────────────────────────────────────────────────────────────────
+
+/**
+ * Send a best-effort cancel request for a running TinyFish run.
+ * Fire-and-forget: errors are swallowed so they never surface to the caller.
+ */
+async function cancelRun(runId: string): Promise<void> {
+	if (!config.TINYFISH_API_KEY) return;
+	try {
+		await fetch(`${TINYFISH_BASE_URL}/v1/runs/${encodeURIComponent(runId)}/cancel`, {
+			method: "POST",
+			headers: { "X-API-Key": config.TINYFISH_API_KEY },
+		});
+	} catch {
+		// best-effort — ignore network errors
+	}
+}
+
 // ─── Main client ──────────────────────────────────────────────────────────────
 
 /**
@@ -95,6 +113,9 @@ async function* parseSseStream(
  * Chosen over sync (/v1/automation/run) and async (/v1/automation/run-async)
  * because SSE supports AbortSignal cancellation — critical for per-agent
  * timeouts (30–60 s) used in Step 5.
+ *
+ * On AbortError (timeout): sends a cancel request to TinyFish before throwing,
+ * so the remote run is cleaned up immediately.
  *
  * Returns the structured `result` from the COMPLETE event.
  */
@@ -111,43 +132,50 @@ export async function callTinyFish(
 		headers["X-API-Key"] = config.TINYFISH_API_KEY;
 	}
 
-	const response = await fetch(url, {
-		method: "POST",
-		headers,
-		body: JSON.stringify(request),
-		signal,
-	});
-
-	if (!response.ok) {
-		const body = await response.text().catch(() => "");
-		throw new TinyFishError(response.status, `TinyFish error ${response.status}: ${body}`);
-	}
-
-	if (!response.body) {
-		throw new TinyFishError(0, "TinyFish returned empty response body");
-	}
-
-	// Consume the SSE stream until we get the COMPLETE event
 	let runId: string | undefined;
 
-	for await (const event of parseSseStream(response.body)) {
-		if (event.run_id && !runId) runId = event.run_id;
+	try {
+		const response = await fetch(url, {
+			method: "POST",
+			headers,
+			body: JSON.stringify(request),
+			signal,
+		});
 
-		if (event.type === "COMPLETE") {
-			if (event.status === "FAILED") {
-				throw new TinyFishError(
-					0,
-					`TinyFish run failed: ${event.error?.message ?? "unknown error"}`,
-					runId,
-				);
-			}
-			return {
-				run_id: runId ?? event.run_id ?? "",
-				result: event.result ?? {},
-			};
+		if (!response.ok) {
+			const body = await response.text().catch(() => "");
+			throw new TinyFishError(response.status, `TinyFish error ${response.status}: ${body}`);
 		}
-	}
 
-	// Stream ended without a COMPLETE event
-	throw new TinyFishError(0, "TinyFish SSE stream ended without COMPLETE event", runId);
+		if (!response.body) {
+			throw new TinyFishError(0, "TinyFish returned empty response body");
+		}
+
+		// Consume the SSE stream until we get the COMPLETE event
+		for await (const event of parseSseStream(response.body)) {
+			if (event.run_id && !runId) runId = event.run_id;
+
+			if (event.type === "COMPLETE") {
+				if (event.status === "FAILED") {
+					throw new TinyFishError(
+						0,
+						`TinyFish run failed: ${event.error?.message ?? "unknown error"}`,
+						runId,
+					);
+				}
+				return {
+					run_id: runId ?? event.run_id ?? "",
+					result: event.result ?? {},
+				};
+			}
+		}
+
+		// Stream ended without a COMPLETE event
+		throw new TinyFishError(0, "TinyFish SSE stream ended without COMPLETE event", runId);
+	} catch (err) {
+		if (err instanceof Error && (err.name === "AbortError" || err.message.includes("aborted"))) {
+			if (runId) await cancelRun(runId);
+		}
+		throw err;
+	}
 }

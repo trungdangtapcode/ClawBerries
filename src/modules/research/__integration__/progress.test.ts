@@ -14,10 +14,14 @@
  *
  * Run: pnpm test:integration
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+
 import Redis from "ioredis";
-import type { AgentType, ResearchProgressState } from "@/shared/types/research.js";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { reportProgress } from "@/modules/research/progress.js";
+import type {
+	AgentType,
+	ResearchProgressState,
+} from "@/shared/types/research.js";
 
 // ─── Infrastructure ────────────────────────────────────────────────────────────
 
@@ -28,11 +32,24 @@ const redisClient = new Redis(REDIS_URL);
 
 const PROGRESS_KEY = (id: string) => `progress:${id}`;
 
-async function seedProgress(requestId: string, state: ResearchProgressState): Promise<void> {
-	await redisClient.set(PROGRESS_KEY(requestId), JSON.stringify(state), "EX", 120);
+async function seedProgress(
+	requestId: string,
+	state: ResearchProgressState,
+): Promise<void> {
+	await redisClient.set(
+		PROGRESS_KEY(requestId),
+		JSON.stringify(state),
+		"EX",
+		120,
+	);
 }
 
-const AGENT_TYPES: AgentType[] = ["linkedin", "github", "employer", "web_search"];
+const AGENT_TYPES: AgentType[] = [
+	"linkedin",
+	"github",
+	"employer",
+	"web_search",
+];
 
 function makeProgressState(
 	total: number,
@@ -57,7 +74,10 @@ function makeProgressState(
 
 // ─── Telegram fetch interceptor ────────────────────────────────────────────────
 
-interface CapturedMessage { chat_id: string; text: string }
+interface CapturedMessage {
+	chat_id: string;
+	text: string;
+}
 const receivedMessages: CapturedMessage[] = [];
 const originalFetch = globalThis.fetch;
 

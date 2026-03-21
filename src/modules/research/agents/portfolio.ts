@@ -1,5 +1,5 @@
-import { callTinyFish } from "../tinyfish-client.js";
 import type { PortfolioReport } from "@/shared/types/research.js";
+import { callTinyFish } from "../tinyfish-client.js";
 
 const TIMEOUT_MS = 60_000;
 
@@ -42,7 +42,9 @@ Return as structured JSON.`,
 			lastUpdatedYear: raw.lastUpdatedYear ?? null,
 			freshnessScore: raw.freshnessScore ?? 50,
 			screenshotUrl: raw.screenshotUrl ?? null,
-			summary: raw.summary ?? `Portfolio: ${raw.projects?.length ?? 0} projects, freshness ${raw.freshnessScore ?? 50}/100`,
+			summary:
+				raw.summary ??
+				`Portfolio: ${raw.projects?.length ?? 0} projects, freshness ${raw.freshnessScore ?? 50}/100`,
 		};
 	} finally {
 		clearTimeout(timer);

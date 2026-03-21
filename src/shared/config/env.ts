@@ -27,6 +27,19 @@ const envSchema = z.object({
 
 	// TinyFish
 	TINYFISH_API_KEY: z.string().optional(),
+
+	// Exa
+	EXA_API_KEY: z.string().optional(),
+
+	// Google Search (via Gemini grounding) — reuses GEMINI_API_KEY / GEMINI_MODEL
+	// dynamicThreshold: 0.0 = always search, 1.0 = almost never search.
+	// If unset, MODE_UNSPECIFIED is used (always search, most thorough).
+	GOOGLE_SEARCH_DYNAMIC_THRESHOLD: z.coerce.number().min(0).max(1).optional(),
+
+	// Research provider: "tinyfish" | "exa" | "google" (default: tinyfish)
+	RESEARCH_PROVIDER: z.enum(["tinyfish", "exa", "google"]).default("tinyfish"),
+
+	RESEARCH_TIMEOUT_MS: z.coerce.number().default(300_000),
 });
 
 export type Env = z.infer<typeof envSchema>;

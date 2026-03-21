@@ -30,6 +30,8 @@ export type WorkEntry = {
 	startDate: string | null;
 	endDate: string | null;
 	description: string | null;
+	/** Company website URL if found near this entry in the CV */
+	companyUrl: string | null;
 };
 
 // ─── Layer 4: Skills, Links, Publications, Awards, Document Meta ─────────────
@@ -41,7 +43,14 @@ export type SkillEntry = {
 
 export type LinkEntry = {
 	href: string;
-	type: "linkedin" | "github" | "portfolio" | "email" | "phone" | "publication" | "other";
+	type:
+		| "linkedin"
+		| "github"
+		| "portfolio"
+		| "email"
+		| "phone"
+		| "publication"
+		| "other";
 	text: string | null;
 	page: number | null;
 };
@@ -52,6 +61,8 @@ export type PublicationEntry = {
 	date: string | null;
 	coAuthors: string[];
 	doi: string | null;
+	/** Direct URL to the paper or venue page if found in the CV */
+	url: string | null;
 };
 
 export type AwardEntry = {
@@ -59,6 +70,11 @@ export type AwardEntry = {
 	organization: string | null;
 	date: string | null;
 	rank: string | null;
+	/** Direct URL to the competition/award page if found in the CV */
+	url: string | null;
+	/** Whether this award has a public results page that can be verified via web search.
+	 *  false for personal certifications (IELTS, TOEFL), internal awards, etc. */
+	publiclyVerifiable: boolean;
 };
 
 export type DocumentMeta = {
@@ -135,6 +151,7 @@ Return a JSON object with ALL of the following sections:
    - "startDate": string | null (YYYY-MM format)
    - "endDate": string | null (YYYY-MM if ended, null if "Present")
    - "description": string | null (responsibilities/achievements combined)
+   - "companyUrl": string | null (company website URL if found near this entry or anywhere in the CV)
 
 4. "skills" — array of skills mentioned
    - "name": string (e.g. "Python", "Kubernetes")
@@ -156,12 +173,18 @@ Return a JSON object with ALL of the following sections:
    - "date": string | null (YYYY or YYYY-MM)
    - "coAuthors": string[] (list of co-author names)
    - "doi": string | null
+   - "url": string | null (direct URL to the paper, conference page, or proceedings if found in the CV)
 
 7. "awards" — array of awards, prizes, honors, scholarships
    - "title": string
    - "organization": string | null (who granted it)
    - "date": string | null (YYYY or YYYY-MM)
    - "rank": string | null (e.g. "Winner", "Second Prize", "Third Prize", "Finalist")
+   - "url": string | null (direct URL to the competition/award page if found in the CV)
+   - "publiclyVerifiable": boolean — true if this award has a public results/winners page
+     that could be found online (e.g. hackathon results, competition leaderboards).
+     false for personal certifications (IELTS, TOEFL, GRE), internal company awards,
+     or anything that only the candidate would have proof of.
 
 8. "documentMeta"
    - "pageCount": number
@@ -173,6 +196,11 @@ Rules:
 - Use YYYY-MM date format wherever possible. Use "Present" → null for endDate.
 - For links: include mailto:, tel:, http://, https:// — every clickable href.
 - For skills evidencedBy: check if the skill appears in a linked GitHub/portfolio project context.
+- URL fields (companyUrl, url on awards/publications): Only populate these if you can
+  extract the actual hyperlink href from the PDF. If text like [Certificate] or [Evidence]
+  appears but you cannot resolve the underlying URL, set the field to null.
+  NEVER use placeholder domains like example.com. NEVER guess or fabricate URLs.
+  Only real, fully-qualified URLs that are actually present in the PDF as hyperlinks.
 - Return valid JSON only.
 `.trim();
 }
@@ -187,7 +215,9 @@ function parseGeminiJson(
 	fileName: string,
 ): PdfOcrResult {
 	if (responseJson.promptFeedback?.blockReason) {
-		throw new Error(`Gemini blocked request: ${responseJson.promptFeedback.blockReason}`);
+		throw new Error(
+			`Gemini blocked request: ${responseJson.promptFeedback.blockReason}`,
+		);
 	}
 	const text = responseJson.candidates?.[0]?.content?.parts
 		?.map((part) => part.text ?? "")
@@ -276,7 +306,8 @@ export async function processPdfWithGemini(
 				`Gemini API request failed (${response.status} ${response.statusText}): ${errorBody}`,
 			);
 		}
-		const responseJson = (await response.json()) as GeminiGenerateContentResponse;
+		const responseJson =
+			(await response.json()) as GeminiGenerateContentResponse;
 		return parseGeminiJson(responseJson, path.basename(absolutePdfPath));
 	} catch (error) {
 		if (
