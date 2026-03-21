@@ -25,6 +25,8 @@ export const agentTypeEnum = pgEnum("agent_type", [
 	"portfolio",
 	"employer",
 	"web_search",
+	"publication",
+	"award",
 ]);
 
 export const agentStatusEnum = pgEnum("agent_status", [

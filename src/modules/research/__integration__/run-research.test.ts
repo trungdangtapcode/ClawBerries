@@ -15,7 +15,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { eq } from "drizzle-orm";
 import * as schema from "@/shared/db/schema.js";
-import type { CandidateProfile } from "@/shared/types/candidate.js";
+import type { DispatchPreviewItem } from "@/modules/parser/dispatcher.js";
 import type { ResearchProgressState } from "@/shared/types/research.js";
 import { runResearch } from "@/modules/research/run-research.js";
 
@@ -34,38 +34,7 @@ const redisClient = new Redis(REDIS_URL);
 
 let fakePort: number;
 let fakeServer: Server;
-
-const agentResponses: Record<string, { result: Record<string, unknown> }> = {
-	linkedin: {
-		result: {
-			profileFound: true,
-			positions: [
-				{
-					title: "Engineer",
-					company: "Acme",
-					startDate: "2021-01",
-					endDate: "2023-01",
-				},
-			],
-			education: [],
-			endorsementsCount: 5,
-			recommendationsCount: 2,
-			discrepancies: [],
-		},
-	},
-	github: {
-		result: {
-			username: "testuser",
-			totalRepos: 12,
-			totalStars: 34,
-			commitsLast90Days: 87,
-			topLanguages: [{ language: "TypeScript", percentage: 60 }],
-			notableRepos: [],
-			skillsEvidence: { TypeScript: true },
-		},
-	},
-	default: { result: { ok: true } },
-};
+let originalFetch: typeof globalThis.fetch;
 
 function buildSseResponse(result: unknown): string {
 	const runId = `run-${Math.random().toString(36).slice(2, 8)}`;
@@ -81,17 +50,18 @@ async function startFakeTinyFish(): Promise<void> {
 		req.on("data", (c) => { raw += c; });
 		req.on("end", () => {
 			let body: { url?: string; goal?: string } = {};
-			try {
-				body = JSON.parse(raw);
-			} catch { /* ignore */ }
+			try { body = JSON.parse(raw); } catch { /* ignore */ }
 
-			// Route based on the starting URL or goal text
-			const signal = body.url ?? body.goal ?? "";
-			let result: Record<string, unknown> = agentResponses.default!.result;
-			if (signal.includes("linkedin") || (body.goal?.toLowerCase().includes("linkedin"))) {
-				result = agentResponses.linkedin!.result;
-			} else if (signal.includes("github") || (body.goal?.toLowerCase().includes("github"))) {
-				result = agentResponses.github!.result;
+			// Return a result matching the agent type inferred from the url/goal
+			const signal = `${body.url ?? ""} ${body.goal ?? ""}`.toLowerCase();
+			let result: Record<string, unknown> = { ok: true, summary: "default agent completed" };
+
+			if (signal.includes("linkedin")) {
+				result = { profileFound: true, positions: [], discrepancies: [], summary: "linkedin ok" };
+			} else if (signal.includes("github")) {
+				result = { username: "testuser", totalRepos: 5, summary: "github ok" };
+			} else if (signal.includes("google") || signal.includes("search")) {
+				result = { mentions: [], summary: "web search ok" };
 			}
 
 			res.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -102,8 +72,9 @@ async function startFakeTinyFish(): Promise<void> {
 	await new Promise<void>((resolve) => fakeServer.listen(0, resolve));
 	const addr = fakeServer.address() as { port: number };
 	fakePort = addr.port;
+
 	// Intercept fetch: redirect all calls to agent.tinyfish.ai → fake server
-	const originalFetch = globalThis.fetch;
+	originalFetch = globalThis.fetch;
 	globalThis.fetch = async (url, init) => {
 		const u = url.toString().replace("https://agent.tinyfish.ai", `http://127.0.0.1:${fakePort}`);
 		return originalFetch(u, init);
@@ -112,27 +83,42 @@ async function startFakeTinyFish(): Promise<void> {
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
-const testProfile: CandidateProfile = {
-	fullName: "Integration Test User",
-	email: "test@example.com",
-	phone: null,
-	links: {
-		linkedin: "https://www.linkedin.com/in/testuser",
-		github: "https://github.com/testuser",
-		portfolio: null,
+/** Minimal DispatchPreviewItem[] matching what Step 4 would produce for a candidate
+ *  with a LinkedIn, GitHub, one employer, and a web search agent. */
+const testItems: DispatchPreviewItem[] = [
+	{
+		agentType: "linkedin",
+		target: "https://www.linkedin.com/in/testuser",
+		targetUrl: "https://www.linkedin.com/in/testuser",
+		timeout: 45_000,
+		browserProfile: "stealth",
+		prompt: "Verify name variants and employment history.",
 	},
-	workHistory: [
-		{
-			company: "Acme Corp",
-			title: "Software Engineer",
-			startDate: "2021-01",
-			endDate: "2023-06",
-			description: null,
-		},
-	],
-	education: [],
-	skillsClaimed: ["TypeScript", "Node.js"],
-};
+	{
+		agentType: "github",
+		target: "https://github.com/testuser",
+		targetUrl: "https://api.github.com/users/testuser",
+		timeout: 30_000,
+		browserProfile: "lite",
+		prompt: "Check repo languages vs claimed skills.",
+	},
+	{
+		agentType: "employer",
+		target: "Acme Corp",
+		targetUrl: "https://www.google.com/search?q=%22Acme+Corp%22+Vietnam+company",
+		timeout: 45_000,
+		browserProfile: "stealth",
+		prompt: "Verify company existence via registry.",
+	},
+	{
+		agentType: "web_search",
+		target: "Integration Test User Acme Corp",
+		targetUrl: "https://www.google.com/search?q=Integration+Test+User+Acme+Corp",
+		timeout: 30_000,
+		browserProfile: "lite",
+		prompt: "Search public web for profile consistency.",
+	},
+];
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -150,6 +136,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+	globalThis.fetch = originalFetch;
 	fakeServer.close();
 
 	if (requestId) {
@@ -181,31 +168,30 @@ beforeEach(async () => {
 
 describe("runResearch — integration", () => {
 	it("initializes Redis progress state with the correct total agent count", async () => {
-		await runResearch(requestId, testProfile);
+		await runResearch(requestId, testItems);
 
 		const raw = await redisClient.get(`progress:${requestId}`);
 		expect(raw).not.toBeNull();
 
 		const state: ResearchProgressState = JSON.parse(raw!);
-		// linkedin + github + employer(Acme Corp) + web_search = 4
-		expect(state.total).toBe(4);
+		expect(state.total).toBe(testItems.length); // 4 agents
 		expect(state.startedAt).toBeGreaterThan(0);
-		expect(state.agents).toHaveLength(4);
+		expect(state.agents).toHaveLength(testItems.length);
 	});
 
 	it("creates agent_results rows in the database for each agent", async () => {
-		await runResearch(requestId, testProfile);
+		await runResearch(requestId, testItems);
 
 		const rows = await db
 			.select()
 			.from(schema.agentResults)
 			.where(eq(schema.agentResults.requestId, requestId));
 
-		expect(rows.length).toBe(4);
+		expect(rows.length).toBe(testItems.length);
 	});
 
 	it("marks the research_request status as 'researching'", async () => {
-		await runResearch(requestId, testProfile);
+		await runResearch(requestId, testItems);
 
 		const [req] = await db
 			.select()
@@ -216,7 +202,7 @@ describe("runResearch — integration", () => {
 	});
 
 	it("all agents complete and Redis done counter equals total", async () => {
-		await runResearch(requestId, testProfile);
+		await runResearch(requestId, testItems);
 
 		const raw = await redisClient.get(`progress:${requestId}`);
 		const state: ResearchProgressState = JSON.parse(raw!);
@@ -226,7 +212,7 @@ describe("runResearch — integration", () => {
 	});
 
 	it("each agent progress item has a non-null summary after completion", async () => {
-		await runResearch(requestId, testProfile);
+		await runResearch(requestId, testItems);
 
 		const raw = await redisClient.get(`progress:${requestId}`);
 		const state: ResearchProgressState = JSON.parse(raw!);
@@ -238,7 +224,7 @@ describe("runResearch — integration", () => {
 	});
 
 	it("agent_results rows are updated with completed status and duration", async () => {
-		await runResearch(requestId, testProfile);
+		await runResearch(requestId, testItems);
 
 		const rows = await db
 			.select()
@@ -251,28 +237,16 @@ describe("runResearch — integration", () => {
 		}
 	});
 
-	it("spawns exactly one employer agent per company (max 5)", async () => {
-		const manyJobsProfile: CandidateProfile = {
-			...testProfile,
-			links: { linkedin: null, github: null, portfolio: null },
-			workHistory: [
-				{ company: "Alpha", title: "E", startDate: null, endDate: null, description: null },
-				{ company: "Beta", title: "E", startDate: null, endDate: null, description: null },
-				{ company: "Gamma", title: "E", startDate: null, endDate: null, description: null },
-				{ company: "Delta", title: "E", startDate: null, endDate: null, description: null },
-				{ company: "Epsilon", title: "E", startDate: null, endDate: null, description: null },
-				{ company: "Zeta", title: "E", startDate: null, endDate: null, description: null }, // >5, should be skipped
-			],
-		};
-
-		await runResearch(requestId, manyJobsProfile);
+	it("each item's agentType and target are recorded in agent_results", async () => {
+		await runResearch(requestId, testItems);
 
 		const rows = await db
 			.select()
 			.from(schema.agentResults)
 			.where(eq(schema.agentResults.requestId, requestId));
 
-		const employerRows = rows.filter((r) => r.agentType === "employer");
-		expect(employerRows).toHaveLength(5);
+		const types = rows.map((r) => r.agentType).sort();
+		const expected = testItems.map((i) => i.agentType).sort();
+		expect(types).toEqual(expected);
 	});
 });
