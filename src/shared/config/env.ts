@@ -24,6 +24,9 @@ const envSchema = z.object({
 	GITHUB_TOKEN: z.string().optional(),
 	SERPAPI_KEY: z.string().optional(),
 	BRIGHTDATA_API_KEY: z.string().optional(),
+
+	// TinyFish
+	TINYFISH_API_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

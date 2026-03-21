@@ -322,77 +322,137 @@ Multiple TinyFish agents run simultaneously, each researching a different data s
 ### Why does it exist?
 Sequential research would take 5-10 minutes. Parallel execution hits the 3-minute SLA. Each source provides a different facet of the candidate's profile — together they form a complete picture.
 
+### TinyFish API — how agents are dispatched
+
+All agents use the **SSE streaming endpoint** (not sync) because SSE supports `AbortSignal` cancellation, which is required for per-agent timeouts.
+
+```
+POST https://agent.tinyfish.ai/v1/automation/run-sse
+X-API-Key: <TINYFISH_API_KEY>
+Content-Type: application/json
+
+{
+  "url": "<starting URL for the agent>",
+  "goal": "<natural-language extraction instructions>",
+  "browser_profile": "lite" | "stealth"
+}
+```
+
+**Browser profile per agent:**
+| Agent | Profile | Reason |
+|-------|---------|--------|
+| LinkedIn | `stealth` | Bot detection, login walls |
+| GitHub | `lite` | Plain GitHub REST API JSON |
+| Portfolio | `stealth` | JS-rendered SPAs, hosting bot detection |
+| Employer | `stealth` | masothue.com + LinkedIn Company Pages |
+| Web Search | `lite` | Standard Google HTML results |
+
+**SSE event stream:**
+```
+data: {"type":"STARTED","run_id":"run-abc123"}
+
+data: {"type":"PROGRESS","purpose":"Clicking submit button"}
+
+data: {"type":"COMPLETE","run_id":"run-abc123","status":"COMPLETED","result":{...}}
+```
+
+The client resolves on `COMPLETE`. If `status` is `FAILED`, a `TinyFishError` is thrown.
+
+> **Note:** TinyFish may return `COMPLETED` even for unreachable pages, embedding error info in `result` rather than using `status: FAILED`.
+
 ### What to do — per agent:
 
 #### 5A: LinkedIn Agent
 | Step | Action | Tool |
 |------|--------|------|
-| 1 | Call Bright Data / ScrapIn API with LinkedIn URL | REST API |
-| 2 | Extract: positions, education, endorsements, recommendations, activity | JSON parsing |
+| 1 | Call TinyFish SSE with LinkedIn URL, `browser_profile: stealth` | TinyFish `/v1/automation/run-sse` |
+| 2 | Extract: positions, education, endorsements, recommendations | TinyFish goal prompt |
 | 3 | Compare positions against CV `work_history[]` | Diff logic |
 | 4 | Flag discrepancies: title mismatches, date gaps, missing roles | Severity tagging |
 | 5 | Return `LinkedInReport` JSON | — |
-| **Timeout** | 45 sec | **Fallback**: Google cache search for LinkedIn profile |
+| **Timeout** | 45 sec | **Fallback**: partial data / empty defaults |
 
 #### 5B: GitHub Agent
 | Step | Action | Tool |
 |------|--------|------|
-| 1 | Call GitHub REST API: `/users/{username}` | REST API |
-| 2 | Fetch repos: `/users/{username}/repos?sort=updated&per_page=30` | REST API |
-| 3 | Fetch contribution stats: `/users/{username}/events` (last 90 days) | REST API |
-| 4 | Calculate: top languages, commit frequency, star count | Aggregation |
-| 5 | Cross-reference claimed skills against actual languages used | Diff logic |
-| 6 | Identify notable repos (stars > 10, forks > 5) | Filtering |
-| 7 | Return `GitHubReport` JSON | — |
-| **Timeout** | 30 sec | **Fallback**: return partial data collected so far |
+| 1 | Call TinyFish SSE starting at `https://api.github.com/users/{username}`, `browser_profile: lite` | TinyFish `/v1/automation/run-sse` |
+| 2 | Fetch repos and events via goal instructions | TinyFish goal prompt |
+| 3 | Calculate: top languages, commit frequency, star count | Aggregation in goal |
+| 4 | Cross-reference claimed skills against actual languages used | Diff logic |
+| 5 | Return `GitHubReport` JSON | — |
+| **Timeout** | 30 sec | **Fallback**: partial data / empty defaults |
 
 #### 5C: Portfolio Agent
 | Step | Action | Tool |
 |------|--------|------|
-| 1 | Launch Playwright headless browser | TinyFish worker |
-| 2 | Navigate to portfolio URL, wait for JS rendering | Playwright |
-| 3 | Take full-page screenshot | Playwright |
-| 4 | Extract: project titles, descriptions, tech stack, links | BeautifulSoup parse |
-| 5 | Check if linked GitHub repos / demos are live | HTTP HEAD requests |
-| 6 | Assess freshness (last modified headers, copyright year, recent projects) | Heuristics |
-| 7 | Return `PortfolioReport` JSON + screenshot URL | — |
-| **Timeout** | 60 sec | **Fallback**: skip with note "Portfolio could not be accessed" |
+| 1 | Call TinyFish SSE with portfolio URL, `browser_profile: stealth` | TinyFish `/v1/automation/run-sse` |
+| 2 | Wait for JS rendering (SPA support via stealth browser) | TinyFish agent |
+| 3 | Extract: project titles, descriptions, tech stack, freshness | TinyFish goal prompt |
+| 4 | Return `PortfolioReport` JSON + optional screenshot URL | — |
+| **Timeout** | 60 sec | **Fallback**: `accessible: false`, empty projects |
 
 #### 5D: Employer Verification Agent (per company)
 | Step | Action | Tool |
 |------|--------|------|
-| 1 | Search Vietnam National Business Registry by company name | Web scrape / API |
-| 2 | Search masothue.com by company name for tax code verification | Web scrape |
-| 3 | Optionally call AsiaVerify KYB API | REST API |
-| 4 | Search LinkedIn Company Page via Bright Data for employee count | REST API |
-| 5 | Google search for recent news / reviews | SerpAPI |
-| 6 | Calculate credibility score (0-100) | Weighted scoring |
-| 7 | Flag: company doesn't exist, dissolved, size mismatch, industry mismatch | Red flag logic |
-| 8 | Return `EmployerReport` JSON | — |
-| **Timeout** | 45 sec | **Fallback**: Google search results only |
+| 1 | Call TinyFish SSE starting at masothue.com search URL, `browser_profile: stealth` | TinyFish `/v1/automation/run-sse` |
+| 2 | Extract: tax code, registration status, founding date | TinyFish goal prompt |
+| 3 | Also search Google/LinkedIn for employee count and recent news | TinyFish goal prompt |
+| 4 | Calculate credibility score (0-100) | Weighted scoring in goal |
+| 5 | Flag: company doesn't exist, dissolved, size mismatch | Red flag logic |
+| 6 | Return `EmployerReport` JSON | — |
+| **Timeout** | 45 sec | **Fallback**: `verified: false`, credibility 50, empty flags |
 
 #### 5E: Web Search Agent
 | Step | Action | Tool |
 |------|--------|------|
-| 1 | Search: `"{candidate name}" site:linkedin.com OR site:github.com` | SerpAPI |
-| 2 | Search: `"{candidate name}" {most recent company}` | SerpAPI |
-| 3 | Search: `"{candidate name}" conference OR speaker OR award` | SerpAPI |
-| 4 | Compile findings: articles, mentions, conference talks, awards | Aggregation |
-| 5 | Return `WebSearchReport` JSON | — |
+| 1 | Call TinyFish SSE starting at Google search for candidate name, `browser_profile: lite` | TinyFish `/v1/automation/run-sse` |
+| 2 | Run multiple searches: general, LinkedIn/GitHub, conferences/awards | TinyFish goal prompt |
+| 3 | Compile findings: articles, mentions, conference talks, awards | Aggregation |
+| 4 | Return `WebSearchReport` JSON | — |
 | **Timeout** | 30 sec | **Fallback**: return whatever results gathered |
+
+### Actual orchestration (TypeScript)
+
+```typescript
+// src/modules/research/run-research.ts
+export async function runResearch(requestId: string, profile: CandidateProfile) {
+  const tasks = buildTasks(profile);              // determine which agents to run
+
+  await db.insert(agentResults).values(            // create 'running' DB rows
+    tasks.map(t => ({ requestId, agentType: t.agentType, agentTarget: t.target, status: 'running' }))
+  );
+
+  await redis.set(`progress:${requestId}`, JSON.stringify({
+    total: tasks.length, completed: 0, failed: 0, timedOut: 0,
+    startedAt: Date.now(), agents: [...running]
+  }), 'EX', 600);
+
+  await db.update(researchRequests).set({ status: 'researching' });
+
+  // Run all in parallel with a 120 s global hard deadline
+  await Promise.race([
+    Promise.allSettled(tasks.map(t => t.run())),   // each agent has its own AbortController
+    new Promise(r => setTimeout(r, 120_000)),
+  ]);
+
+  // Force-mark any still-running agents as timed out
+}
+```
 
 ### Agent result handling:
 ```
 For EACH agent that completes:
-  1. Update agent_results table: status → 'completed', result → JSON
-  2. Update Redis progress counter: completed += 1
+  1. Update agent_results table: status → 'completed', result → JSON, completedAt → now
+  2. Update Redis progress counter: completed += 1, agent.status, agent.summary
   3. If agent FAILED: status → 'failed', error_message → reason
-  4. If agent TIMED OUT: status → 'timeout', result → partial data if any
+  4. If agent TIMED OUT (AbortError): status → 'timeout'
+  5. After 120 s global race: any still 'running' → force 'timeout'
 ```
 
 ### Exit criteria:
 ✅ All agents completed, failed, or timed out (hard limit: 120 seconds)
 ✅ Each agent's result stored in `agent_results` table
+✅ Redis `progress:{requestId}` reflects final state of all agents
 ✅ At least 1 agent returned usable data (otherwise → early failure path)
 ✅ Move to **Step 7**
 
