@@ -1,7 +1,7 @@
 import type { PortfolioReport } from "@/shared/types/research.js";
 import { callTinyFish } from "../tinyfish-client.js";
 
-const TIMEOUT_MS = 60_000;
+const TIMEOUT_MS = 120_000;
 
 /**
  * 5C — Portfolio Agent

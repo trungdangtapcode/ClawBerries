@@ -80,6 +80,7 @@ if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
 		const brief = await synthesize(row!.id, ocrResult);
 		process.stdout.write(`[step 7] Done — ${brief.overallRating.toUpperCase()}\n`);
 		process.stdout.write(`\n${JSON.stringify(brief, null, 2)}\n`);
+		process.exit(0);
 	})().catch((error: unknown) => {
 		if (error instanceof Error) {
 			process.stderr.write(`${error.message}\n${error.stack}\n`);

@@ -7,15 +7,16 @@ metadata: {"openclaw": {"requires": {"bins": ["pnpm"]}, "os": ["darwin", "linux"
 
 # ClawBerries — Job Applicant Research Agent
 
-You are managing an automated CV verification pipeline. When HR sends a CV or asks to verify a candidate, use the ClawBerries CLI to run the pipeline.
+You are managing an automated CV verification pipeline. When HR sends a CV or asks to verify a candidate, use the ClawBerries tools to run the pipeline.
 
 ## Setup
 
-The ClawBerries project is at `/Users/PhatNguyen/Desktop/ClawBerries`.
+The ClawBerries project directory is defined by the `CLAWBERRIES_DIR` environment variable (defaults to the project root where `package.json` lives).
+
 All commands must be run from that directory with env vars loaded:
 
 ```bash
-cd /Users/PhatNguyen/Desktop/ClawBerries && set -a && source .env && set +a
+cd "/mnt/mmlab2024nas/vund/.svn/envs/lotus" && set -a && source .env && set +a
 ```
 
 ## Commands
@@ -25,80 +26,49 @@ cd /Users/PhatNguyen/Desktop/ClawBerries && set -a && source .env && set +a
 When HR shares a CV file or asks you to verify a candidate:
 
 ```bash
-cd /Users/PhatNguyen/Desktop/ClawBerries && set -a && source .env && set +a && pnpm tsx src/cli.ts run "<path-to-cv.pdf>"
+cd "/mnt/mmlab2024nas/vund/.svn/envs/lotus" && set -a && source .env && set +a && pnpm dev "<path-to-cv.pdf>"
 ```
 
-This returns a JSON object with `requestId`. Save this ID — you'll need it to check status and retrieve the report.
-
-The pipeline runs asynchronously (Steps 3→7):
+The pipeline runs synchronously through Steps 3→7:
 - Step 3: Parse CV with Gemini Vision
 - Step 4: Plan verification agents
 - Step 5: Run parallel research (LinkedIn, GitHub, portfolio, employer, web search)
-- Step 6: Progress reporting
+- Step 6: Collect results
 - Step 7: LLM synthesis with structured output
 
-### 2. Check pipeline status
+### 2. Look up a candidate by email
 
 ```bash
-cd /Users/PhatNguyen/Desktop/ClawBerries && set -a && source .env && set +a && pnpm tsx src/cli.ts status "<requestId>"
+"/mnt/mmlab2024nas/vund/.svn/envs/lotus/webhook-server/scripts/checkcv.sh" lookup "<email>"
 ```
 
-Returns JSON with `status` ("parsing", "researching", "synthesizing", "delivered", "failed") and agent progress.
+Returns name, file path, and submission date from the database.
 
-### 3. Get the final report
+### 3. Analyze a candidate by email
 
 ```bash
-cd /Users/PhatNguyen/Desktop/ClawBerries && set -a && source .env && set +a && pnpm tsx src/cli.ts report "<requestId>"
+"/mnt/mmlab2024nas/vund/.svn/envs/lotus/webhook-server/scripts/checkcv.sh" analyze "<email>"
 ```
 
-Returns the full candidate brief with:
-- **CV Validity Score** (0-100)
-- **Verified claims** with evidence
-- **Inconsistencies** rated by severity
-- **Gaps** (employment, skill, education)
-- **Interview must-confirm items** with specific questions for HR
-- **Overall rating**: GREEN / YELLOW / RED
+Looks up the CV in the database and runs the full pipeline.
 
-### 4. Cancel a running pipeline
+### 4. List recent submissions
 
 ```bash
-cd /Users/PhatNguyen/Desktop/ClawBerries && set -a && source .env && set +a && pnpm tsx src/cli.ts cancel "<requestId>"
+"/mnt/mmlab2024nas/vund/.svn/envs/lotus/webhook-server/scripts/checkcv.sh" list [limit]
 ```
 
-### 5. Start the webhook server
+Shows recent CV submissions (default 10).
+
+### 5. CLI commands (alternative)
 
 ```bash
-cd /Users/PhatNguyen/Desktop/ClawBerries && set -a && source .env && set +a && pnpm tsx src/cli.ts serve
+cd "/mnt/mmlab2024nas/vund/.svn/envs/lotus" && set -a && source .env && set +a
+pnpm cli run "<cv.pdf>"            # Run verification
+pnpm cli status "<requestId>"      # Check pipeline progress
+pnpm cli report "<requestId>"      # Get the final candidate brief
+pnpm cli cancel "<requestId>"      # Cancel a running pipeline
 ```
-
-Starts the HTTP server on the configured PORT that receives Google Form submissions at `POST /api/applications`.
-
-## Handling Telegram callbacks
-
-When HR clicks a button from a ClawBerries notification:
-
-- **`cb_run:<requestId>`** — Start verification. See "Async workflow" below.
-- **`cb_skip:<requestId>`** — Reply "Skipped" and do nothing.
-- **`cb_viewcv:<requestId>`** — Run `status` command and show the CV file path.
-- **`cb_report:<requestId>`** — Run `report` command and present results.
-
-## Async workflow (IMPORTANT)
-
-The verification pipeline takes 3-10 minutes. Do NOT block waiting for it.
-
-When HR clicks "Verify Now" (`cb_run`):
-
-1. Run `clawberries run <cv-path>` — this returns `{ requestId }` immediately
-2. Tell HR: "Verification started for [name]. I'll notify you when it's done. Request ID: [id]"
-3. **Do NOT wait.** End the current response. Move on to other tasks.
-
-Later, when HR asks for results or you want to check:
-1. Run `clawberries status <requestId>` to check if it's done
-2. If status is "delivered", run `clawberries report <requestId>` and present results
-3. If status is "researching" or "synthesizing", tell HR it's still running
-4. If status is "failed", tell HR and suggest retrying
-
-HR can also proactively ask: "What's the status of [requestId]?" or "Show me the report for [name]"
 
 ## How to present the report to HR
 
@@ -115,5 +85,5 @@ Keep it concise for Telegram. If too long, summarize the top findings and offer 
 ## Prerequisites
 
 - Docker must be running (Postgres + Redis containers)
-- `.env` file must have: GEMINI_API_KEY, TINYFISH_API_KEY, DATABASE_URL, REDIS_URL
-- The webhook server must be running for Google Form submissions
+- `.env` file must have: `GEMINI_API_KEY`, `TINYFISH_API_KEY`, `DATABASE_URL`, `REDIS_URL`
+- `CLAWBERRIES_DIR` env var should point to the project root
