@@ -1,2 +1,6 @@
+packages:
+  - "."
+  - "web"
+
 ignoredBuiltDependencies:
   - esbuild

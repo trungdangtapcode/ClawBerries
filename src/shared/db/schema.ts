@@ -7,6 +7,7 @@ import {
 	timestamp,
 	uuid,
 	varchar,
+	vector,
 } from "drizzle-orm/pg-core";
 
 // Enums
@@ -43,9 +44,32 @@ export const overallRatingEnum = pgEnum("overall_rating", [
 	"red",
 ]);
 
+export const jobStatusEnum = pgEnum("job_status", [
+	"active",
+	"paused",
+	"closed",
+]);
+
+export const screeningStatusEnum = pgEnum("screening_status", [
+	"pending",
+	"shortlisted",
+	"waitlisted",
+	"rejected",
+]);
+
 // Tables
+export const jobOpenings = pgTable("job_openings", {
+	id: uuid().primaryKey().defaultRandom(),
+	title: varchar("title", { length: 255 }).notNull(),
+	department: varchar("department", { length: 255 }),
+	description: text("description"),
+	status: jobStatusEnum().notNull().default("active"),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 export const researchRequests = pgTable("research_requests", {
 	id: uuid().primaryKey().defaultRandom(),
+	jobOpeningId: uuid("job_opening_id").references(() => jobOpenings.id),
+	screeningStatus: screeningStatusEnum("screening_status").notNull().default("pending"),
 	telegramChatId: varchar("telegram_chat_id", { length: 64 }).notNull(),
 	telegramMessageId: integer("telegram_message_id"),
 	originalFileName: varchar("original_file_name", { length: 255 }),
@@ -70,6 +94,10 @@ export const candidateProfiles = pgTable("candidate_profiles", {
 	education: jsonb("education").default([]),
 	skillsClaimed: jsonb("skills_claimed").default([]),
 	rawExtraction: jsonb("raw_extraction"),
+	/** Full plain text extracted from the CV PDF */
+	documentText: text("document_text"),
+	/** OpenAI text-embedding-3-small vector (1536 dims) */
+	documentVec: vector("document_vec", { dimensions: 1536 }),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -108,5 +136,19 @@ export const auditLogs = pgTable("audit_logs", {
 	requestId: uuid("request_id").references(() => researchRequests.id),
 	action: varchar("action", { length: 64 }).notNull(),
 	details: jsonb("details"),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const interviews = pgTable("interviews", {
+	id: uuid().primaryKey().defaultRandom(),
+	candidateName: varchar("candidate_name", { length: 255 }).notNull(),
+	candidateEmail: varchar("candidate_email", { length: 255 }),
+	jobTitle: varchar("job_title", { length: 255 }),
+	interviewType: varchar("interview_type", { length: 32 }).notNull().default("video"),
+	startTime: timestamp("start_time").notNull(),
+	endTime: timestamp("end_time").notNull(),
+	location: varchar("location", { length: 255 }),
+	notes: text("notes"),
+	googleCalendarUrl: text("google_calendar_url"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 });

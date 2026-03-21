@@ -87,6 +87,7 @@ const ocrFixture: PdfOcrResult = {
 	publications: [],
 	awards: [],
 	documentMeta: { pageCount: 2, language: "en" },
+	document_text: "E2E Test Candidate resume content",
 };
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────

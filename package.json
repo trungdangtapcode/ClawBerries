@@ -23,7 +23,8 @@
 		"pipeline:step3-step4": "tsx src/features/step3-step4/run-step3-step4-pipeline.ts",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
-		"db:studio": "drizzle-kit studio"
+		"db:studio": "drizzle-kit studio",
+		"api:dev": "tsx watch src/api/server.ts"
 	},
 	"keywords": [],
 	"author": "",

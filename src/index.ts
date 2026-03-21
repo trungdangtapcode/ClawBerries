@@ -30,6 +30,8 @@ if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
 			pdfPath,
 			"Extract all structured data from this CV.",
 		);
+		console.log(ocrResult)
+
 		process.stdout.write(
 			`[step 3] Done — extracted ${ocrResult.identity.fullName}\n`,
 		);

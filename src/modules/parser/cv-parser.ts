@@ -44,13 +44,13 @@ export type SkillEntry = {
 export type LinkEntry = {
 	href: string;
 	type:
-		| "linkedin"
-		| "github"
-		| "portfolio"
-		| "email"
-		| "phone"
-		| "publication"
-		| "other";
+	| "linkedin"
+	| "github"
+	| "portfolio"
+	| "email"
+	| "phone"
+	| "publication"
+	| "other";
 	text: string | null;
 	page: number | null;
 };
@@ -93,6 +93,8 @@ export type PdfOcrResult = {
 	publications: PublicationEntry[];
 	awards: AwardEntry[];
 	documentMeta: DocumentMeta;
+	/** Raw text content of the entire PDF, as a single plain string */
+	document_text: string;
 };
 
 type GeminiGenerateContentResponse = {
@@ -189,6 +191,7 @@ Return a JSON object with ALL of the following sections:
 8. "documentMeta"
    - "pageCount": number
    - "language": string | null (primary language, e.g. "en", "vi")
+9. "document_text": string — the full raw text of the PDF, concatenated in reading order, as a single plain string (NOT an object, NOT nested). Include every word visible in the document.
 
 Rules:
 - Do not invent content. Only extract what is present in the PDF.
@@ -320,14 +323,6 @@ export async function processPdfWithGemini(
 	} finally {
 		clearTimeout(timeout);
 	}
-}
-
-export async function processPdfWithCodex(
-	pdfPath: string,
-	userTask: string,
-	timeoutMs = DEFAULT_TIMEOUT_MS,
-): Promise<PdfOcrResult> {
-	return processPdfWithGemini(pdfPath, userTask, timeoutMs);
 }
 
 export class GeminiPdfWorker {
