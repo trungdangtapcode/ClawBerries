@@ -1,4 +1,3 @@
-export { formatBrief } from "./formatter.js";
 export type { ResearchBundle } from "./research-bundle.js";
 export {
 	assembleResearchBundle,
