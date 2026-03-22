@@ -58,9 +58,9 @@ export function Layout() {
   const baseBreadcrumbs = getBreadcrumb(location.pathname)
   const breadcrumbs: Crumb[] = jobId && jobTitleForBreadcrumb
     ? [
-        ...baseBreadcrumbs.map(c => ({ ...c, href: c.href || undefined })),
-        { label: jobTitleForBreadcrumb, href: "/documents" },
-      ]
+      ...baseBreadcrumbs.map(c => ({ ...c, href: c.href || undefined })),
+      { label: jobTitleForBreadcrumb, href: "/documents" },
+    ]
     : baseBreadcrumbs
 
   useEffect(() => {
@@ -95,10 +95,10 @@ export function Layout() {
         {/* Logo */}
         <div className="flex h-16 items-center gap-3 px-5">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 font-heading text-lg font-bold">
-            K
+            C
           </div>
           <span className="font-heading text-lg font-semibold tracking-tight">
-            Kinetic Talent
+            ClawBerries Agent
           </span>
           <button
             className="ml-auto rounded-md p-1 hover:bg-white/10 lg:hidden"
@@ -149,9 +149,9 @@ export function Layout() {
         {/* User card */}
         <div className="border-t border-white/10 px-4 py-4">
           <div className="flex items-center gap-3">
-            <Avatar fallback="Marcus Chen" size="sm" className="bg-secondary-container text-on-secondary-container" />
+            <Avatar fallback="Super HR" size="sm" className="bg-secondary-container text-on-secondary-container" />
             <div className="overflow-hidden">
-              <p className="truncate text-sm font-medium text-white">Marcus Chen</p>
+              <p className="truncate text-sm font-medium text-white">Super HR</p>
               <p className="truncate text-xs text-white/50">Sr. Recruiter</p>
             </div>
           </div>
@@ -218,7 +218,7 @@ export function Layout() {
           </Button>
 
           <div className="hidden items-center gap-3 border-l border-outline-variant/20 pl-4 md:flex">
-            <Avatar fallback="Marcus Chen" size="sm" />
+            <Avatar fallback="Super HR" size="sm" />
           </div>
         </header>
 

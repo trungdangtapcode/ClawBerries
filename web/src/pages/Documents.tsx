@@ -316,41 +316,72 @@ function CandidateRow({ candidate, onShortlist, onWaitlist, onReject }: {
 export function Documents() {
   const navigate = useNavigate()
   const [jobs, setJobs] = useState<JobFromAPI[]>([])
-  const [candidates, setCandidates] = useState<Candidate[]>([])
+  // Map of jobId → candidates (null key = unassigned)
+  const [candidatesByJob, setCandidatesByJob] = useState<Record<string, Candidate[]>>({})
   const [filter, setFilter] = useState("all")
   const [loading, setLoading] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
 
-  // Load data
+  // Load data — fetch candidates for each job separately
   useEffect(() => {
     async function loadData() {
       try {
-        const [jobsRes, cvRes] = await Promise.all([
-          fetch(`${API_BASE}/api/jobs`),
-          fetch(`${API_BASE}/api/cv-library`),
-        ])
-
+        const jobsRes = await fetch(`${API_BASE}/api/jobs`)
+        let allJobs: JobFromAPI[] = []
         if (jobsRes.ok) {
           const data = await jobsRes.json()
-          setJobs(data.jobs || [])
+          allJobs = data.jobs || []
+          setJobs(allJobs)
         }
 
-        if (cvRes.ok) {
-          const data = await cvRes.json()
-          if (data.files && data.files.length > 0) {
-            const dbCandidates: Candidate[] = data.files.slice(0, 5).map((f: any) => ({
-              id: f.id,
-              name: f.candidateName || f.name.replace(/\.[^.]+$/, ""),
-              role: f.tags?.[0] || "Candidate",
-              location: "—",
-              aiMatch: Math.floor(Math.random() * 20 + 75),
-              status: (f.screeningStatus || "pending") as Candidate["status"],
-              screeningStatus: f.screeningStatus || "pending",
-              appliedAgo: f.date ? `Applied ${timeAgo(f.date)}` : "Applied recently",
-            }))
-            setCandidates(dbCandidates)
+        // Fetch candidates per job
+        const grouped: Record<string, Candidate[]> = {}
+        const fetches = allJobs.map(async (job) => {
+          try {
+            const res = await fetch(`${API_BASE}/api/cv-library?jobId=${encodeURIComponent(job.id)}`)
+            if (!res.ok) return
+            const data = await res.json()
+            if (data.files && data.files.length > 0) {
+              grouped[job.id] = data.files.map((f: any) => ({
+                id: f.id,
+                name: f.candidateName || f.name.replace(/\.[^.]+$/, ""),
+                role: job.title,
+                location: "—",
+                aiMatch: Math.floor(Math.random() * 20 + 75),
+                status: (f.screeningStatus || "pending") as Candidate["status"],
+                screeningStatus: f.screeningStatus || "pending",
+                appliedAgo: f.date ? `Applied ${timeAgo(f.date)}` : "Applied recently",
+              }))
+            }
+          } catch { /* skip */ }
+        })
+        await Promise.all(fetches)
+
+        // Also fetch unassigned (no jobId)
+        try {
+          const allRes = await fetch(`${API_BASE}/api/cv-library`)
+          if (allRes.ok) {
+            const allData = await allRes.json()
+            const assignedIds = new Set(Object.values(grouped).flat().map(c => c.id))
+            const unassigned = (allData.files || [])
+              .filter((f: any) => !assignedIds.has(f.id))
+              .map((f: any) => ({
+                id: f.id,
+                name: f.candidateName || f.name.replace(/\.[^.]+$/, ""),
+                role: "Unassigned",
+                location: "—",
+                aiMatch: Math.floor(Math.random() * 20 + 75),
+                status: (f.screeningStatus || "pending") as Candidate["status"],
+                screeningStatus: f.screeningStatus || "pending",
+                appliedAgo: f.date ? `Applied ${timeAgo(f.date)}` : "Applied recently",
+              }))
+            if (unassigned.length > 0) {
+              grouped["__unassigned__"] = unassigned
+            }
           }
-        }
+        } catch { /* skip */ }
+
+        setCandidatesByJob(grouped)
       } catch {
         // Keep empty
       } finally {
@@ -368,9 +399,15 @@ export function Documents() {
         body: JSON.stringify({ screeningStatus: newStatus }),
       })
       if (res.ok) {
-        setCandidates((prev) => prev.map((c) =>
-          c.id === id ? { ...c, screeningStatus: newStatus, status: newStatus as Candidate["status"] } : c
-        ))
+        setCandidatesByJob((prev) => {
+          const next = { ...prev }
+          for (const key of Object.keys(next)) {
+            next[key] = next[key]!.map((c) =>
+              c.id === id ? { ...c, screeningStatus: newStatus, status: newStatus as Candidate["status"] } : c
+            )
+          }
+          return next
+        })
       }
     } catch {
       console.error("Failed to update screening status")
@@ -378,6 +415,14 @@ export function Documents() {
   }
 
   const filteredJobs = filter === "all" ? jobs : jobs.filter((j) => j.id === filter)
+
+  // Build the grouped sections for the candidate review area
+  const jobSections = filteredJobs
+    .filter((job) => candidatesByJob[job.id] && candidatesByJob[job.id]!.length > 0)
+    .map((job, i) => ({ job, candidates: candidatesByJob[job.id]!, colorIdx: i }))
+
+  const unassigned = filter === "all" ? (candidatesByJob["__unassigned__"] || []) : []
+  const totalCandidates = jobSections.reduce((sum, s) => sum + s.candidates.length, 0) + unassigned.length
 
   return (
     <div className="flex flex-col gap-8 max-w-screen-xl">
@@ -462,14 +507,14 @@ export function Documents() {
         </div>
       )}
 
-      {/* Key Candidates for Review */}
+      {/* Key Candidates for Review — GROUPED BY JOB ROLE */}
       <div className="bg-white rounded-2xl shadow-sm border border-outline-variant/10 overflow-hidden">
-        {/* Table header */}
+        {/* Section header */}
         <div className="px-6 py-5 border-b border-outline-variant/10 flex items-center justify-between bg-surface-container-lowest">
           <div>
             <h2 className="text-lg font-bold text-on-surface font-heading">Key Candidates for Review</h2>
             <p className="text-xs text-on-surface-variant font-medium mt-0.5">
-              Top applicants requiring immediate hiring manager feedback
+              Top applicants grouped by position, requiring immediate hiring manager feedback
             </p>
           </div>
           <a
@@ -480,28 +525,79 @@ export function Documents() {
           </a>
         </div>
 
-        {/* Candidate rows */}
+        {/* Grouped candidate sections */}
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
-        ) : candidates.length === 0 ? (
+        ) : totalCandidates === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-on-surface-variant gap-2">
             <Users className="h-10 w-10 opacity-20" />
             <p className="text-sm font-medium">No candidates to review</p>
             <p className="text-xs">Upload CVs to get started with AI screening</p>
           </div>
         ) : (
-          <div className="divide-y divide-outline-variant/10">
-            {candidates.map((c) => (
-              <CandidateRow
-                key={c.id}
-                candidate={c}
-                onShortlist={() => updateScreeningStatus(c.id, "shortlisted")}
-                onWaitlist={() => updateScreeningStatus(c.id, "waitlisted")}
-                onReject={() => updateScreeningStatus(c.id, "rejected")}
-              />
-            ))}
+          <div>
+            {jobSections.map(({ job, candidates, colorIdx }) => {
+              const color = CARD_COLORS[colorIdx % CARD_COLORS.length]!
+              return (
+                <div key={job.id}>
+                  {/* Job group header */}
+                  <div className="flex items-center gap-3 px-6 py-3 bg-surface-container-low border-b border-outline-variant/10">
+                    <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center", color.bg, color.text)}>
+                      <Briefcase className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-on-surface">{job.title}</span>
+                      {job.department && (
+                        <span className="text-xs text-on-surface-variant">• {job.department}</span>
+                      )}
+                    </div>
+                    <span className="ml-auto text-[10px] font-bold text-on-surface-variant bg-surface-container-high px-2 py-0.5 rounded-full uppercase tracking-wider">
+                      {candidates.length} candidate{candidates.length !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  {/* Candidate rows for this job */}
+                  <div className="divide-y divide-outline-variant/10">
+                    {candidates.map((c) => (
+                      <CandidateRow
+                        key={c.id}
+                        candidate={c}
+                        onShortlist={() => updateScreeningStatus(c.id, "shortlisted")}
+                        onWaitlist={() => updateScreeningStatus(c.id, "waitlisted")}
+                        onReject={() => updateScreeningStatus(c.id, "rejected")}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+
+            {/* Unassigned candidates */}
+            {unassigned.length > 0 && (
+              <div>
+                <div className="flex items-center gap-3 px-6 py-3 bg-surface-container-low border-b border-outline-variant/10">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-slate-100 text-slate-500">
+                    <Users className="h-3.5 w-3.5" />
+                  </div>
+                  <span className="text-sm font-bold text-on-surface-variant">Unassigned</span>
+                  <span className="ml-auto text-[10px] font-bold text-on-surface-variant bg-surface-container-high px-2 py-0.5 rounded-full uppercase tracking-wider">
+                    {unassigned.length} candidate{unassigned.length !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="divide-y divide-outline-variant/10">
+                  {unassigned.map((c) => (
+                    <CandidateRow
+                      key={c.id}
+                      candidate={c}
+                      onShortlist={() => updateScreeningStatus(c.id, "shortlisted")}
+                      onWaitlist={() => updateScreeningStatus(c.id, "waitlisted")}
+                      onReject={() => updateScreeningStatus(c.id, "rejected")}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

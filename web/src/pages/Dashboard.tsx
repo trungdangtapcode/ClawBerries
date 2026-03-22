@@ -140,7 +140,7 @@ export function Dashboard() {
       {/* Greeting */}
       <div>
         <h1 className="font-heading text-3xl font-bold tracking-tight lg:text-4xl">
-          Good morning, Marcus.
+          Good morning, Super HR.
         </h1>
         <p className="mt-2 text-on-surface-variant">
           {loading ? (
