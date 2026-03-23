@@ -131,6 +131,17 @@ export const candidateBriefs = pgTable("candidate_briefs", {
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const formSubmissions = pgTable("form_submissions", {
+	id: uuid().primaryKey().defaultRandom(),
+	fullName: varchar("full_name", { length: 255 }).notNull(),
+	email: varchar("email", { length: 255 }).notNull(),
+	originalFileName: varchar("original_file_name", { length: 255 }),
+	storagePath: text("storage_path").notNull(),
+	tallyResponseId: varchar("tally_response_id", { length: 64 }),
+	requestId: uuid("request_id").references(() => researchRequests.id),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const auditLogs = pgTable("audit_logs", {
 	id: uuid().primaryKey().defaultRandom(),
 	requestId: uuid("request_id").references(() => researchRequests.id),

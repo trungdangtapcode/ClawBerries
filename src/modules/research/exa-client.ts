@@ -46,10 +46,10 @@ export async function callExa(
 	signal?.throwIfAborted?.();
 
 	const response = await exa.searchAndContents(request.goal, {
-		numResults: 5,
+		numResults: 3,
 		type: "auto",
 		...(targetDomain ? { includeDomains: [targetDomain] } : {}),
-		text: { maxCharacters: 2000 },
+		text: { maxCharacters: 500 },
 		summary: { query: request.goal },
 	});
 

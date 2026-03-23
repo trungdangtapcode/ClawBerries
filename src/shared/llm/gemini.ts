@@ -12,7 +12,7 @@ type GeminiResponse = {
 
 const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com";
 const DEFAULT_MODEL = "gemini-3-flash-preview";
-const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 120_000;
 
 export function createGeminiClient(opts?: {
 	apiKey?: string;
